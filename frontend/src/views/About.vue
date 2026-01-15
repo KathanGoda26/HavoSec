@@ -84,12 +84,21 @@
 </template>
 
 <script setup>
+import { computed, onMounted } from 'vue'
+import { useContentStore } from '@/stores/content'
 import { 
   ShieldCheckIcon, 
   LightBulbIcon, 
   EyeIcon, 
   HeartIcon 
 } from '@heroicons/vue/24/outline'
+
+const contentStore = useContentStore()
+
+// Dynamic content
+const aboutTitle = computed(() => contentStore.about?.title || 'About HavoSec')
+const aboutDescription = computed(() => contentStore.about?.description || 'Protecting organizations with cutting-edge cybersecurity analytics and threat detection since 2020')
+const missionText = computed(() => contentStore.about?.mission || 'To empower organizations with advanced cybersecurity analytics that transform how they detect, respond to, and prevent cyber threats. We believe that proactive security should be accessible, intelligent, and automated.')
 
 const values = [
   {
@@ -124,6 +133,10 @@ const certifications = [
   'GDPR Compliant',
   'CCPA Compliant'
 ]
+
+onMounted(() => {
+  contentStore.fetchAbout()
+})
 </script>
 
 <style scoped>

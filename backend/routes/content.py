@@ -3,6 +3,13 @@ from datetime import datetime
 
 router = APIRouter()
 
+@router.get("/")
+async def get_all_content(request: Request):
+    db = request.app.state.db
+    cursor = db.website_content.find({}, {"_id": 0})
+    contents = await cursor.to_list(length=100)
+    return {"content": contents, "sections": contents}
+
 @router.get("/{section}")
 async def get_content(section: str, request: Request):
     db = request.app.state.db
@@ -12,13 +19,6 @@ async def get_content(section: str, request: Request):
         raise HTTPException(status_code=404, detail="Content not found")
     
     return content
-
-@router.get("/")
-async def get_all_content(request: Request):
-    db = request.app.state.db
-    cursor = db.website_content.find({}, {"_id": 0})
-    contents = await cursor.to_list(length=100)
-    return {"content": contents, "sections": contents}
 
 @router.put("/{section}")
 async def update_content(section: str, request: Request):

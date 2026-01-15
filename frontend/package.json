@@ -1,7 +1,7 @@
 {
-  "name": "lockshield-frontend",
+  "name": "havosec-frontend",
   "version": "1.0.0",
-  "description": "LockShield Analytics Frontend - Vue.js 3 + Vite",
+  "description": "HavoSec Cybersecurity Platform - Vue.js 3 + Vite",
   "type": "module",
   "scripts": {
     "dev": "vite",

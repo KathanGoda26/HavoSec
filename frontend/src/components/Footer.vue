@@ -124,7 +124,7 @@
       <div class="footer-bottom">
         <div class="footer-bottom-left">
           <p class="copyright">
-            © {{ currentYear }} LockShield Analytics. All rights reserved.
+            © {{ currentYear }} HavoSec. All rights reserved.
           </p>
           <div class="legal-links">
             <a href="#" class="legal-link">Privacy Policy</a>

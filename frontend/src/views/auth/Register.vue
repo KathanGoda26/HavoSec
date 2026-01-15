@@ -227,7 +227,7 @@
           <h3 class="notice-title">Secure Registration</h3>
           <p class="notice-description">
             All access requests are reviewed by our security team. Only authorized 
-            personnel will be granted access to the LockShield Analytics platform.
+            personnel will be granted access to the HavoSec platform.
           </p>
         </div>
       </div>

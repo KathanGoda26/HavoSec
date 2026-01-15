@@ -5,7 +5,7 @@
       <section class="demo-hero" data-testid="demo-hero">
         <h1 class="heading-luxury">Book Your Demo</h1>
         <p class="hero-subtitle">
-          See LockShield Analytics in action. Get a personalized demonstration 
+          See HavoSec in action. Get a personalized demonstration 
           tailored to your organization's security needs.
         </p>
       </section>
@@ -233,7 +233,7 @@ const expectations = [
     id: 1,
     icon: EyeIcon,
     title: 'Platform Overview',
-    description: 'Complete walkthrough of the LockShield Analytics interface and core features'
+    description: 'Complete walkthrough of the HavoSec interface and core features'
   },
   {
     id: 2,

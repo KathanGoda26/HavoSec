@@ -6,7 +6,7 @@
         <div class="hero-text">
           <h1 class="hero-title" data-testid="hero-title">
             Secure Your Digital Assets with 
-            <span class="text-gradient">LockShield Analytics</span>
+            <span class="text-gradient">HavoSec</span>
           </h1>
           <p class="hero-description" data-testid="hero-description">
             Advanced cybersecurity analytics and threat detection platform 
@@ -67,7 +67,7 @@
     <!-- 3D Examples Gallery -->
     <!-- <section class="examples-section-3d" data-testid="examples-section">
       <div class="container">
-        <h2 class="section-title">See LockShield in Action</h2>
+        <h2 class="section-title">See HavoSec in Action</h2>
         <p class="section-subtitle">
           Explore our advanced cybersecurity solutions through interactive demonstrations
         </p>
@@ -83,7 +83,7 @@
             <h2 class="demo-title">Ready to Protect Your</h2>
             <h2 class="demo-title2">Organization?</h2>
             <p class="demo-description">
-              Get a personalized demonstration of LockShield Analytics 
+              Get a personalized demonstration of HavoSec 
               and see how we can strengthen your cybersecurity posture.
             </p>
             <LuxuryButton 

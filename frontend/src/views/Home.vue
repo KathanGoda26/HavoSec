@@ -41,20 +41,20 @@
     <!-- Features and Benefits -->
     <section class="features-section" ref="featuresSection" data-testid="features-section">
       <div class="container">
-        <h2 class="section-title">Advanced Security Features</h2>
+        <h2 class="section-title">{{ featuresTitle }}</h2>
         <div class="features-grid">
           <div 
-            v-for="feature in features" 
-            :key="feature.id"
+            v-for="(feature, index) in displayFeatures" 
+            :key="index"
             class="feature-card glass"
-            :data-testid="`feature-${feature.id}`"
+            :data-testid="`feature-${index}`"
           >
             <div class="feature-icon">
-              <component :is="feature.icon" class="w-8 h-8" />
+              <component :is="getFeatureIcon(index)" class="w-8 h-8" />
             </div>
             <h3 class="feature-title">{{ feature.title }}</h3>
             <p class="feature-description">{{ feature.description }}</p>
-            <div class="feature-benefit">
+            <div v-if="feature.benefit" class="feature-benefit">
               <strong>Benefit:</strong> {{ feature.benefit }}
             </div>
           </div>

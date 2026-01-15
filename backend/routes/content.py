@@ -18,7 +18,7 @@ async def get_all_content(request: Request):
     db = request.app.state.db
     cursor = db.website_content.find({}, {"_id": 0})
     contents = await cursor.to_list(length=100)
-    return {"sections": contents}
+    return {"content": contents, "sections": contents}
 
 @router.put("/{section}")
 async def update_content(section: str, request: Request):

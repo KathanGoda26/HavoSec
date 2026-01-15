@@ -12,6 +12,9 @@ import VulnerabilityDetail from '@/views/VulnerabilityDetail.vue'
 // Auth pages  
 import Login from '@/views/auth/Login.vue'
 import Register from '@/views/auth/Register.vue'
+import ForgotPassword from '@/views/auth/ForgotPassword.vue'
+import ResetPassword from '@/views/auth/ResetPassword.vue'
+import VerifyEmail from '@/views/auth/VerifyEmail.vue'
 
 // Dashboard pages
 import Dashboard from '@/views/dashboard/Dashboard.vue'

@@ -3,10 +3,9 @@
     <div class="container">
       <!-- Hero Section -->
       <section class="about-hero" data-testid="about-hero">
-        <h1 class="heading-luxury">About HavoSec</h1>
+        <h1 class="heading-luxury">{{ aboutTitle }}</h1>
         <p class="hero-subtitle">
-          Protecting organizations with cutting-edge cybersecurity analytics 
-          and threat detection since 2020
+          {{ aboutDescription }}
         </p>
       </section>
 
@@ -14,9 +13,7 @@
       <section class="mission-section glass" data-testid="mission-section">
         <h2 class="section-title">Our Mission</h2>
         <p class="mission-text">
-          To empower organizations with advanced cybersecurity analytics that transform 
-          how they detect, respond to, and prevent cyber threats. We believe that 
-          proactive security should be accessible, intelligent, and automated.
+          {{ missionText }}
         </p>
       </section>
 

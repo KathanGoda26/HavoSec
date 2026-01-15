@@ -3,6 +3,9 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
 const { sendEmail } = require('../utils/email');
+
+// Brand name
+const BRAND_NAME = 'HavoSec';
 const router = express.Router();
 
 // JWT Secret
@@ -58,7 +61,7 @@ router.post('/register', [
     try {
       await sendEmail({
         to: user.email,
-        subject: 'Welcome to LockShield Analytics',
+        subject: `Welcome to ${BRAND_NAME}`,
         text: `Welcome ${user.firstName}! Your account has been created successfully.`
       });
     } catch (emailError) {

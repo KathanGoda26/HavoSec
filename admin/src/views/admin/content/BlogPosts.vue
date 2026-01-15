@@ -134,8 +134,21 @@ function removeImage() {
           <CCol :md="4">
             <div class="mb-3"><CFormLabel>Status</CFormLabel><CFormSelect v-model="formData.status"><option v-for="s in statuses" :key="s.value" :value="s.value">{{ s.label }}</option></CFormSelect></div>
             <div class="mb-3"><CFormLabel>Category</CFormLabel><CFormSelect v-model="formData.category"><option v-for="c in categories" :key="c.value" :value="c.value">{{ c.label }}</option></CFormSelect></div>
-            <div class="mb-3"><CFormLabel>Featured Image URL</CFormLabel><CFormInput v-model="formData.featuredImage" /></div>
-            <div class="mb-3"><CFormLabel>Author Name *</CFormLabel><CFormInput v-model="formData.author.name" required /></div>
+            <div class="mb-3">
+              <CFormLabel>Featured Image</CFormLabel>
+              <div v-if="formData.featuredImage" class="mb-2">
+                <img :src="formData.featuredImage" alt="Featured Image Preview" style="max-width: 100%; max-height: 150px; object-fit: cover; border-radius: 8px;" />
+                <CButton color="danger" size="sm" variant="ghost" @click="removeImage" class="mt-1">Remove Image</CButton>
+              </div>
+              <div v-if="isUploading" class="mb-2">
+                <CProgress :value="uploadProgress" />
+                <small class="text-muted">Uploading... {{ uploadProgress }}%</small>
+              </div>
+              <CFormInput type="file" accept="image/*" @change="handleImageUpload" :disabled="isUploading" />
+              <small class="text-muted d-block mt-1">Or enter URL:</small>
+              <CFormInput v-model="formData.featuredImage" placeholder="https://..." class="mt-1" />
+            </div>
+            <div class="mb-3"><CFormLabel>Author Name *</CFormLabel><CFormInput v-model="formData.author" required /></div>
             <div class="mb-3"><CFormLabel>Tags (comma separated)</CFormLabel><CFormInput :value="formData.tags?.join(', ')" @input="formData.tags = $event.target.value.split(',').map(s => s.trim()).filter(s => s)" /></div>
           </CCol>
         </CRow>

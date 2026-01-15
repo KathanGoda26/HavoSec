@@ -266,6 +266,10 @@ function initScrollAnimations() {
 }
 
 onMounted(() => {
+  // Fetch dynamic content
+  contentStore.fetchHero()
+  contentStore.fetchFeatures()
+  
   initScrollAnimations()
 })
 

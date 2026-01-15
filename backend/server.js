@@ -9,15 +9,20 @@ const compression = require('compression');
 const morgan = require('morgan');
 require('dotenv').config();
 
-// Import routes
+// Import Admin routes
 const { router: adminAuthRoutes } = require('./routes/adminAuth');
 const contentRoutes = require('./routes/content');
 const blogRoutes = require('./routes/blog');
 const demoRequestsRoutes = require('./routes/demoRequests');
 const clientsRoutes = require('./routes/clients');
 
+// Import Client routes (for public website users)
+const clientAuthRoutes = require('./routes/clientAuth');
+const clientDashboardRoutes = require('./routes/clientDashboard');
+
 // Import seed data
 const { seedDatabase } = require('./seed');
+const { seedDatabase: seedClientData } = require('./seedClientData');
 
 const app = express();
 const PORT = process.env.PORT || 8001;

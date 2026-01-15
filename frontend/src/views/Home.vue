@@ -105,12 +105,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import LuxuryButton from '@/components/LuxuryButton.vue'
 import ExamplesGallery3D from '@/components/ExamplesGallery3D.vue'
 import Lock3D from '@/components/Lock3D.vue'
+import { useContentStore } from '@/stores/content'
 import { 
   ShieldCheckIcon, 
   EyeIcon, 
@@ -122,7 +123,38 @@ import {
 
 gsap.registerPlugin(ScrollTrigger)
 
+const contentStore = useContentStore()
 const featuresSection = ref(null)
+
+// Icon mapping for features
+const featureIcons = [ShieldCheckIcon, EyeIcon, BoltIcon, ChartBarIcon, ExclamationTriangleIcon, ClockIcon]
+
+function getFeatureIcon(index) {
+  return featureIcons[index % featureIcons.length]
+}
+
+// Dynamic content with fallbacks
+const heroTitle = computed(() => {
+  const title = contentStore.hero?.title || 'Secure Your Digital Assets with'
+  // Remove "HavoSec" from API title if present to avoid duplication
+  return title.replace(/\s*(HavoSec|with HavoSec)\s*$/i, '').trim() + ' '
+})
+
+const heroSubtitle = computed(() => 
+  contentStore.hero?.subtitle || 'Advanced cybersecurity analytics and threat detection platform designed for modern organizations. Real-time monitoring, AI-powered insights, and automated defense mechanisms.'
+)
+
+const featuresTitle = computed(() => 
+  contentStore.features?.title || 'Advanced Security Features'
+)
+
+const displayFeatures = computed(() => {
+  if (contentStore.features?.items?.length) {
+    return contentStore.features.items
+  }
+  // Fallback features
+  return defaultFeatures
+})
 
 const achievements = [
   { id: 1, number: '50M+', label: 'Threats Blocked Daily' },
@@ -131,45 +163,33 @@ const achievements = [
   { id: 4, number: '24/7', label: 'Security Monitoring' }
 ]
 
-const features = [
+const defaultFeatures = [
   {
-    id: 1,
-    icon: ShieldCheckIcon,
     title: 'Real-Time Threat Detection',
     description: 'AI-powered threat detection that identifies and blocks attacks in milliseconds.',
     benefit: 'Reduce security incidents by 95% with proactive threat prevention.'
   },
   {
-    id: 2,
-    icon: EyeIcon,
     title: 'Advanced Monitoring',
     description: 'Comprehensive visibility across your entire digital infrastructure.',
     benefit: 'Complete security oversight with zero blind spots in your network.'
   },
   {
-    id: 3,
-    icon: BoltIcon,
     title: 'Automated Response',
     description: 'Instant automated responses to security threats and incidents.',
     benefit: 'Minimize damage with response times under 10 seconds.'
   },
   {
-    id: 4,
-    icon: ChartBarIcon,
     title: 'Analytics Dashboard',
     description: 'Rich analytics and reporting for security insights and compliance.',
     benefit: 'Make data-driven security decisions with comprehensive insights.'
   },
   {
-    id: 5,
-    icon: ExclamationTriangleIcon,
     title: 'Incident Management',
     description: 'Streamlined incident response and investigation workflows.',
     benefit: 'Reduce incident resolution time by 80% with automated workflows.'
   },
   {
-    id: 6,
-    icon: ClockIcon,
     title: '24/7 Monitoring',
     description: 'Round-the-clock security monitoring and threat hunting.',
     benefit: 'Never miss a threat with continuous security surveillance.'

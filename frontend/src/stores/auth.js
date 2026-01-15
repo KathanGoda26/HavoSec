@@ -2,8 +2,8 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import axios from 'axios'
 
-const backendBaseUrl = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:8001').replace(/\/$/, '')
-const API_BASE = `${backendBaseUrl}/api`
+const backendBaseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8001/api').replace(/\/$/, '')
+const API_BASE = backendBaseUrl
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)

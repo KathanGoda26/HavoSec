@@ -20,7 +20,7 @@ export default defineConfig(() => {
       extensions: ['.mjs', '.js', '.ts', '.jsx', '.tsx', '.json', '.vue', '.scss'],
     },
     server: {
-      port: 3000,
+      port: 3001,
       host: '0.0.0.0',
       allowedHosts: 'all',
       proxy: {},

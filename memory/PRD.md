@@ -111,7 +111,7 @@ Build an integrated HavoSec application with:
 ## Pending/Backlog Tasks
 
 ### P1 - Medium Priority
-1. Add image upload functionality for blog posts
+1. ~~Add image upload functionality for blog posts~~ ✅ DONE
 2. Implement password reset flow
 3. Add email verification for new users
 
@@ -121,3 +121,4 @@ Build an integrated HavoSec application with:
 3. Real-time notifications
 4. API rate limiting improvements
 5. Caching layer for performance
+6. Rich text editor for blog content

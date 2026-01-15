@@ -1,6 +1,9 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useAdminDataStore } from '@/stores/adminData'
+import axios from 'axios'
+
+const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8001'
 
 const dataStore = useAdminDataStore()
 const isLoading = ref(true)
@@ -9,21 +12,83 @@ const editMode = ref(false)
 const selectedPost = ref(null)
 const searchQuery = ref('')
 const statusFilter = ref('')
+const isUploading = ref(false)
+const uploadProgress = ref(0)
 
-const formData = ref({ title: '', slug: '', excerpt: '', content: '', featuredImage: '', author: { name: '' }, category: 'cybersecurity', tags: [], status: 'draft' })
+const formData = ref({ title: '', slug: '', excerpt: '', content: '', featuredImage: '', author: 'Admin', category: 'cybersecurity', tags: [], status: 'draft' })
 const posts = computed(() => dataStore.blogPosts)
 const categories = [{ value: 'cybersecurity', label: 'Cybersecurity' }, { value: 'ai', label: 'AI & ML' }, { value: 'threat-detection', label: 'Threat Detection' }, { value: 'compliance', label: 'Compliance' }, { value: 'tutorials', label: 'Tutorials' }]
 const statuses = [{ value: 'draft', label: 'Draft', color: 'secondary' }, { value: 'published', label: 'Published', color: 'success' }, { value: 'archived', label: 'Archived', color: 'warning' }]
 
 onMounted(async () => { await dataStore.fetchBlogPosts(); isLoading.value = false })
 
-function openCreateModal() { editMode.value = false; formData.value = { title: '', slug: '', excerpt: '', content: '', featuredImage: '', author: { name: '' }, category: 'cybersecurity', tags: [], status: 'draft' }; showModal.value = true }
-function openEditModal(post) { editMode.value = true; selectedPost.value = post; formData.value = { ...post }; showModal.value = true }
-async function savePost() { let result; if (editMode.value) { result = await dataStore.updateBlogPost(selectedPost.value._id, formData.value) } else { result = await dataStore.createBlogPost(formData.value) } if (result.success) showModal.value = false }
+function openCreateModal() { editMode.value = false; formData.value = { title: '', slug: '', excerpt: '', content: '', featuredImage: '', author: 'Admin', category: 'cybersecurity', tags: [], status: 'draft' }; showModal.value = true }
+function openEditModal(post) { editMode.value = true; selectedPost.value = post; formData.value = { ...post, author: post.author?.name || post.author || 'Admin' }; showModal.value = true }
+async function savePost() { 
+  const postData = { ...formData.value }
+  if (typeof postData.author === 'string') {
+    postData.author = postData.author
+  }
+  let result
+  if (editMode.value) { 
+    result = await dataStore.updateBlogPost(selectedPost.value._id || selectedPost.value.id, postData) 
+  } else { 
+    result = await dataStore.createBlogPost(postData) 
+  } 
+  if (result.success) showModal.value = false 
+}
 async function deletePost(id) { if (confirm('Delete this post?')) await dataStore.deleteBlogPost(id) }
 function getStatusColor(status) { return statuses.find(s => s.value === status)?.color || 'secondary' }
-function formatDate(date) { return new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) }
+function formatDate(date) { if (!date) return 'N/A'; return new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) }
 async function applyFilters() { isLoading.value = true; await dataStore.fetchBlogPosts({ search: searchQuery.value, status: statusFilter.value }); isLoading.value = false }
+
+// Image upload handler
+async function handleImageUpload(event) {
+  const file = event.target.files[0]
+  if (!file) return
+  
+  // Validate file type
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+  if (!allowedTypes.includes(file.type)) {
+    alert('Please upload an image file (JPEG, PNG, GIF, or WebP)')
+    return
+  }
+  
+  // Validate file size (10MB max)
+  if (file.size > 10 * 1024 * 1024) {
+    alert('File size must be less than 10MB')
+    return
+  }
+  
+  isUploading.value = true
+  uploadProgress.value = 0
+  
+  try {
+    const formDataUpload = new FormData()
+    formDataUpload.append('file', file)
+    
+    const response = await axios.post(`${API_BASE}/api/uploads/`, formDataUpload, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (progressEvent) => {
+        uploadProgress.value = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+      }
+    })
+    
+    if (response.data.success) {
+      formData.value.featuredImage = `${API_BASE}${response.data.url}`
+    }
+  } catch (error) {
+    console.error('Upload failed:', error)
+    alert('Failed to upload image. Please try again.')
+  } finally {
+    isUploading.value = false
+    uploadProgress.value = 0
+  }
+}
+
+function removeImage() {
+  formData.value.featuredImage = ''
+}
 </script>
 
 <template>

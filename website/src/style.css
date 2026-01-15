@@ -1,0 +1,400 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom CSS Variables */
+:root {
+  /* Light Mode Colors */
+  --color-primary-purple: #673ee6;
+  --color-primary-green: #00b090;
+  --color-purple-light: #8b5cf6;
+  --color-green-light: #34d399;
+  
+  /* Gradients - Only for buttons */
+  --gradient-primary: linear-gradient(135deg, #673ee6, #00b090);
+  
+  /* Typography */
+  --font-heading: 'Ubuntu-Medium', code;
+  --font-body: 'Ubuntu-Regular', code;
+}
+
+@font-face {
+  font-family: 'Ubuntu-Regular';
+  src: url('/Ubuntu/Ubuntu-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Ubuntu-Italic';
+  src: url('/Ubuntu/Ubuntu-Italic.ttf') format('truetype');
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Ubuntu-Medium';
+  src: url('/Ubuntu/Ubuntu-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: medium;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Ubuntu-Bold';
+  src: url('/Ubuntu/Ubuntu-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: bold;
+  font-display: swap;
+}
+
+html, body, #app {
+  font-family: 'Ubuntu-Regular', code;
+}
+
+/* Ensure all elements inherit Ubuntu unless explicitly needed */
+body, button, input, select, textarea, h1, h2, h3, h4, h5, h6 {
+  font-family: 'Ubuntu-Regular', code;
+}
+
+/* Base typography */
+* {
+  font-family: 'Ubuntu-Regular', code;
+}
+
+body {
+  font-family: 'Ubuntu-Regular', code;
+  font-size: 18px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #ffffff;
+  color: #1a202c;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Light Mode Colors */
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --text-primary: #1a202c;
+  --text-secondary: #4a5568;
+  --text-muted: #718096;
+  --border-color: #e2e8f0;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Dark Mode */
+.dark {
+  /* Dark Mode Colors */
+  --color-primary-purple: #673ee6;
+  --color-primary-green: #00b090;
+  --color-purple-light: #8b5cf6;
+  --color-green-light: #34d399;
+  
+  /* Dark Mode Backgrounds and Text */
+  --bg-primary: #000000;
+  --bg-secondary: #111111;
+  --text-primary: #f7fafc;
+  --text-secondary: #cbd5e0;
+  --text-muted: #a0aec0;
+  --border-color: #2d3748;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+}
+
+.dark body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.dark #app {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* Glass morphism effect */
+.glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: var(--shadow-sm);
+}
+
+.dark .glass {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(126, 99, 119, 0.3);
+  box-shadow: var(--shadow-md);
+}
+
+/* Luxury Button Component */
+.btn-luxury {
+  @apply px-8 py-3 rounded-lg font-semibold text-white transition-all duration-300 transform hover:scale-105;
+  background: var(--gradient-primary);
+}
+
+.btn-luxury:hover {
+  @apply opacity-90;
+}
+
+/* Typography */
+.heading-luxury {
+  font-family: var(--font-heading);
+  @apply text-4xl md:text-6xl font-bold;
+  color: #374151;
+}
+
+.dark .heading-luxury {
+  color: #f9fafb;
+}
+
+.text-gradient {
+  color: #00b090
+}
+
+/* Animations */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-20px); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { 
+    box-shadow: var(--shadow-glass);
+  }
+  50% { 
+    box-shadow: var(--shadow-glass), 0 0 40px rgba(139, 92, 246, 0.8);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Page Transitions */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(30px);
+}
+
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-30px);
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #673ee6, #00b090);
+  border-radius: 4px;
+  transition: background 0.3s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #8b5cf6, #34d399);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #8b5cf6, #34d399);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #a78bfa, #52d3a8);
+}
+
+/* Focus States */
+.focus-luxury:focus {
+  @apply outline-none;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.5);
+}
+
+/* Loading Animation */
+.loading-spinner {
+  @apply w-8 h-8 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin;
+}
+
+.dark .loading-spinner {
+  @apply border-purple-700 border-t-purple-400;
+}
+
+@font-face {
+  font-family: 'Ubuntu';
+  src: url('/Ubuntu/Ubuntu-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Custom CSS Variables */
+:root {
+  /* Fonts */
+  --font-mono: 'Ubuntu-Regular', code;
+  --font-heading: 'Ubuntu-Medium', code;
+  --font-body: 'Ubuntu-Regular', code;
+
+  /* Light Mode Colors */
+  --color-primary-purple: #673ee6;
+  --color-primary-green: #00b090;
+  --color-purple-light: #8b5cf6;
+  --color-green-light: #34d399;
+  
+  /* Gradients - Only for buttons */
+  --gradient-primary: linear-gradient(135deg, #673ee6, #00b090);
+}
+
+/* Apply VT323 to monospace elements */
+.font-mono,
+code,
+pre,
+.stat-value,
+.code-content,
+.command-text {
+  font-family: var(--font-mono);
+}
+
+/* Add retro-tech accent class */
+.text-retro {
+  font-family: var(--font-mono);
+  letter-spacing: 0.5px;
+}
+
+/* Glass morphism effect */
+.glass {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.dark .glass {
+  background: #000000;
+  border: 1px solid rgba(126, 99, 119, 0.2);
+}
+
+/* Luxury Button Component */
+.btn-luxury {
+  @apply px-8 py-3 rounded-lg font-semibold text-white transition-all duration-300 transform hover:scale-105;
+  background: var(--gradient-primary);
+}
+
+.btn-luxury:hover {
+  @apply opacity-90;
+}
+
+/* Typography */
+.heading-luxury {
+  font-family: var(--font-heading);
+  @apply text-4xl md:text-6xl font-bold;
+  color: #374151;
+}
+
+.dark .heading-luxury {
+  color: #f9fafb;
+}
+
+.text-gradient {
+  color: #00b090;
+}
+
+/* Animations */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-20px); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { 
+    box-shadow: var(--shadow-glass);
+  }
+  50% { 
+    box-shadow: var(--shadow-glass), 0 0 40px rgba(139, 92, 246, 0.8);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Page Transitions */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(30px);
+}
+
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-30px);
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #673ee6, #00b090);
+  border-radius: 4px;
+  transition: background 0.3s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #8b5cf6, #34d399);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #8b5cf6, #34d399);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #a78bfa, #52d3a8);
+}
+
+/* Focus States */
+.focus-luxury:focus {
+  @apply outline-none;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.5);
+}
+
+/* Loading Animation */
+.loading-spinner {
+  @apply w-8 h-8 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin;
+}
+
+.dark .loading-spinner {
+  @apply border-purple-700 border-t-purple-400;
+}

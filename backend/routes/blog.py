@@ -70,7 +70,8 @@ async def create_post(request: Request):
     
     result = await db.blog_posts.insert_one(post_doc)
     post_doc["id"] = str(result.inserted_id)
-    del post_doc["_id"] if "_id" in post_doc else None
+    if "_id" in post_doc:
+        del post_doc["_id"]
     
     return {"message": "Post created", "post": post_doc}
 

@@ -113,7 +113,8 @@ async def create_notification(request: Request):
     
     result = await db.notifications.insert_one(notification)
     notification["id"] = str(result.inserted_id)
-    del notification["_id"] if "_id" in notification else None
+    if "_id" in notification:
+        del notification["_id"]
     
     # Send real-time notification via WebSocket
     if notification["userId"]:

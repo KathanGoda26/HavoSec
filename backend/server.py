@@ -71,6 +71,8 @@ app.include_router(clients_router, prefix="/api/admin/clients", tags=["Admin Cli
 app.include_router(client_auth_router, prefix="/api/auth", tags=["Client Auth"])
 app.include_router(client_dashboard_router, prefix="/api/dashboard", tags=["Client Dashboard"])
 app.include_router(uploads_router, prefix="/api/uploads", tags=["File Uploads"])
+app.include_router(password_reset_router, prefix="/api/auth", tags=["Password Reset & Verification"])
+app.include_router(notifications_router, prefix="/api/notifications", tags=["Notifications"])
 
 @app.get("/api/health")
 async def health_check():

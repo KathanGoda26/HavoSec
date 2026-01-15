@@ -5,13 +5,11 @@
       <div class="hero-content">
         <div class="hero-text">
           <h1 class="hero-title" data-testid="hero-title">
-            Secure Your Digital Assets with 
+            {{ heroTitle }}
             <span class="text-gradient">HavoSec</span>
           </h1>
           <p class="hero-description" data-testid="hero-description">
-            Advanced cybersecurity analytics and threat detection platform 
-            designed for modern organizations. Real-time monitoring, 
-            AI-powered insights, and automated defense mechanisms.
+            {{ heroSubtitle }}
           </p>
         </div>
         

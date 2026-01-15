@@ -57,10 +57,17 @@ Build an integrated HavoSec application with:
   - `GET /api/blog` - Public blog posts
   - `POST /api/demo` - Submit demo request
 
+- **File Upload Routes (NEW):**
+  - `POST /api/uploads/` - Upload single image
+  - `POST /api/uploads/multiple` - Upload multiple images
+  - `GET /api/uploads/images/:filename` - Serve uploaded image
+  - `DELETE /api/uploads/images/:filename` - Delete image
+  - `GET /api/uploads/` - List all uploaded images
+
 ### ✅ Admin Panel (localhost:3001)
 - Dashboard with overview stats
 - Website Content Management (all sections editable)
-- Blog Post Management (CRUD)
+- Blog Post Management (CRUD) with Image Upload
 - Demo Request Management
 - Client Company Management
 
@@ -69,6 +76,13 @@ Build an integrated HavoSec application with:
 - About page fetches about section from /api/content
 - Blog page fetches posts from /api/blog
 - Content editable from admin panel
+
+### ✅ Image Upload Feature (NEW)
+- File upload endpoint with validation (10MB max, common image formats)
+- Drag & drop or click to upload in admin panel
+- Preview uploaded images before saving
+- URL input option for external images
+- Automatic unique filename generation
 
 ## Credentials
 - **Admin Panel:** admin@havosec.com / password123

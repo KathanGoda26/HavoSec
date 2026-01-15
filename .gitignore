@@ -43,3 +43,7 @@ Thumbs.db
 *.vi
 *.zip
 *~
+-e 
+# Environment files
+*.env
+*.env.*

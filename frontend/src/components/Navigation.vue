@@ -521,6 +521,12 @@ onUnmounted(() => {
   background: rgba(239, 68, 68, 0.1);
 }
 
+.user-menu-section {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .header-container {

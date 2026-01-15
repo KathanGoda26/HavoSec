@@ -151,13 +151,15 @@ Build an integrated HavoSec application with:
 
 ### P1 - Medium Priority
 1. ~~Add image upload functionality for blog posts~~ ✅ DONE
-2. Implement password reset flow
-3. Add email verification for new users
+2. ~~Implement password reset flow~~ ✅ DONE
+3. ~~Add email verification for new users~~ ✅ DONE
+4. ~~Real-time notifications~~ ✅ DONE
 
 ### P2 - Future/Backlog
 1. Production deployment configuration
 2. Add more dashboard widgets and charts
-3. Real-time notifications
-4. API rate limiting improvements
-5. Caching layer for performance
-6. Rich text editor for blog content
+3. Rich text editor for blog content
+4. Two-factor authentication (2FA)
+5. API rate limiting improvements
+6. Caching layer for performance
+7. Actual email sending integration (currently returns tokens for testing)

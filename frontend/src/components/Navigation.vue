@@ -69,7 +69,11 @@
             </router-link>
           </div>
 
-          <div v-else class="user-menu relative" ref="userMenuRef">
+          <div v-else class="user-menu-section">
+            <!-- Notifications -->
+            <NotificationsDropdown v-if="isAuthenticated" />
+            
+            <div class="user-menu relative" ref="userMenuRef">
             <button
               @click="toggleUserMenu"
               class="user-avatar"

@@ -48,7 +48,7 @@ async def admin_login(request: Request):
     return {
         "success": True,
         "token": token,
-        "user": {
+        "admin": {
             "id": str(user["_id"]),
             "email": user["email"],
             "firstName": user.get("firstName", ""),

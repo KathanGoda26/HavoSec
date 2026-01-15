@@ -9,34 +9,21 @@ export default defineConfig(() => {
     base: './',
     css: {
       postcss: {
-        plugins: [
-          autoprefixer({}), // add options if needed
-        ],
+        plugins: [autoprefixer({})],
       },
     },
     resolve: {
       alias: [
-        // webpack path resolve to vitejs
-        {
-          find: /^~(.*)$/,
-          replacement: '$1',
-        },
-        {
-          find: '@/',
-          replacement: `${path.resolve(__dirname, 'src')}/`,
-        },
-        {
-          find: '@',
-          replacement: path.resolve(__dirname, '/src'),
-        },
+        { find: /^~(.+)/, replacement: path.join(process.cwd(), 'node_modules/$1') },
+        { find: /^@\//, replacement: path.join(process.cwd(), 'src') + '/' },
       ],
       extensions: ['.mjs', '.js', '.ts', '.jsx', '.tsx', '.json', '.vue', '.scss'],
     },
     server: {
       port: 3000,
-      proxy: {
-        // https://vitejs.dev/config/server-options.html
-      },
+      host: '0.0.0.0',
+      allowedHosts: 'all',
+      proxy: {},
     },
   }
 })

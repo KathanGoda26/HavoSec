@@ -16,6 +16,8 @@ from routes.demo_requests import router as demo_router
 from routes.clients import router as clients_router
 from routes.client_dashboard import router as client_dashboard_router
 from routes.uploads import router as uploads_router
+from routes.password_reset import router as password_reset_router
+from routes.notifications import router as notifications_router
 
 # Database client
 db_client = None

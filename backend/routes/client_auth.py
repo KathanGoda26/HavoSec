@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import bcrypt
 import jwt
 import os
+import secrets
 
 router = APIRouter()
 
@@ -55,12 +56,32 @@ async def register(request: Request):
         "company": company,
         "role": "viewer",
         "isActive": True,
+        "emailVerified": False,
         "loginAttempts": 0,
         "createdAt": datetime.utcnow()
     }
     
     result = await db.users.insert_one(user_doc)
     user_id = str(result.inserted_id)
+    
+    # Generate email verification token
+    verification_token = secrets.token_urlsafe(32)
+    await db.email_verifications.insert_one({
+        "email": email.lower(),
+        "token": verification_token,
+        "expiresAt": datetime.utcnow() + timedelta(hours=24),
+        "createdAt": datetime.utcnow()
+    })
+    
+    # Create welcome notification
+    await db.notifications.insert_one({
+        "userId": user_id,
+        "type": "success",
+        "title": "Welcome to HavoSec!",
+        "message": "Your account has been created. Please verify your email to access all features.",
+        "read": False,
+        "createdAt": datetime.utcnow()
+    })
     
     token = create_token(user_id)
     
@@ -73,8 +94,11 @@ async def register(request: Request):
             "firstName": firstName,
             "lastName": lastName,
             "role": "viewer",
-            "company": company
-        }
+            "company": company,
+            "emailVerified": False
+        },
+        "verificationToken": verification_token,  # Remove in production - for testing
+        "verificationLink": f"/auth/verify-email?token={verification_token}"
     }
 
 @router.post("/login")
@@ -106,6 +130,17 @@ async def login(request: Request):
         if attempts >= 5:
             update["lockUntil"] = datetime.utcnow() + timedelta(hours=2)
         await db.users.update_one({"_id": user["_id"]}, {"$set": update})
+        
+        # Create failed login notification
+        await db.notifications.insert_one({
+            "userId": str(user["_id"]),
+            "type": "warning",
+            "title": "Failed Login Attempt",
+            "message": f"Failed login attempt detected at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC",
+            "read": False,
+            "createdAt": datetime.utcnow()
+        })
+        
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
     # Reset login attempts
@@ -114,19 +149,31 @@ async def login(request: Request):
         {"$set": {"loginAttempts": 0, "lastLogin": datetime.utcnow()}, "$unset": {"lockUntil": ""}}
     )
     
-    token = create_token(str(user["_id"]))
+    user_id = str(user["_id"])
+    token = create_token(user_id)
+    
+    # Create login success notification
+    await db.notifications.insert_one({
+        "userId": user_id,
+        "type": "info",
+        "title": "New Login",
+        "message": f"Successful login at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC",
+        "read": False,
+        "createdAt": datetime.utcnow()
+    })
     
     return {
         "success": True,
         "message": "Login successful",
         "token": token,
         "user": {
-            "id": str(user["_id"]),
+            "id": user_id,
             "email": user["email"],
             "firstName": user.get("firstName", ""),
             "lastName": user.get("lastName", ""),
             "role": user.get("role", "viewer"),
-            "company": user.get("company", "")
+            "company": user.get("company", ""),
+            "emailVerified": user.get("emailVerified", False)
         }
     }
 
@@ -153,6 +200,7 @@ async def get_profile(request: Request):
             "firstName": user.get("firstName", ""),
             "lastName": user.get("lastName", ""),
             "role": user.get("role", "viewer"),
-            "company": user.get("company", "")
+            "company": user.get("company", ""),
+            "emailVerified": user.get("emailVerified", False)
         }
     }

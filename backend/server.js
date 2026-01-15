@@ -62,6 +62,7 @@ mongoose.connect(MONGO_URL)
 .then(() => {
   console.log('\x1b[32m%s\x1b[0m', '✓ MongoDB Connected');
   seedDatabase();
+  seedClientData();
 })
 .catch(err => console.error('MongoDB Error:', err));
 

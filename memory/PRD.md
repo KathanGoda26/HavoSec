@@ -57,12 +57,29 @@ Build an integrated HavoSec application with:
   - `GET /api/blog` - Public blog posts
   - `POST /api/demo` - Submit demo request
 
-- **File Upload Routes (NEW):**
+- **File Upload Routes:**
   - `POST /api/uploads/` - Upload single image
   - `POST /api/uploads/multiple` - Upload multiple images
   - `GET /api/uploads/images/:filename` - Serve uploaded image
   - `DELETE /api/uploads/images/:filename` - Delete image
   - `GET /api/uploads/` - List all uploaded images
+
+- **Password Reset & Email Verification Routes (NEW):**
+  - `POST /api/auth/forgot-password` - Request password reset
+  - `POST /api/auth/verify-reset-token` - Verify reset token
+  - `POST /api/auth/reset-password` - Reset password with token
+  - `POST /api/auth/send-verification` - Send/resend verification email
+  - `POST /api/auth/verify-email` - Verify email with token
+  - `GET /api/auth/verification-status/:email` - Check verification status
+
+- **Real-time Notifications Routes (NEW):**
+  - `GET /api/notifications/` - Get user notifications
+  - `POST /api/notifications/` - Create notification
+  - `PUT /api/notifications/:id/read` - Mark as read
+  - `PUT /api/notifications/mark-all-read` - Mark all as read
+  - `DELETE /api/notifications/:id` - Delete notification
+  - `DELETE /api/notifications/` - Clear all notifications
+  - `WebSocket /api/notifications/ws/:userId` - Real-time notification stream
 
 ### ✅ Admin Panel (localhost:3001)
 - Dashboard with overview stats
@@ -77,12 +94,34 @@ Build an integrated HavoSec application with:
 - Blog page fetches posts from /api/blog
 - Content editable from admin panel
 
-### ✅ Image Upload Feature (NEW)
+### ✅ Image Upload Feature
 - File upload endpoint with validation (10MB max, common image formats)
 - Drag & drop or click to upload in admin panel
 - Preview uploaded images before saving
 - URL input option for external images
 - Automatic unique filename generation
+
+### ✅ Password Reset Flow (NEW)
+- Forgot Password page at /auth/forgot-password
+- Reset Password page at /auth/reset-password
+- Secure token-based reset (1 hour expiry)
+- Integration with login page (Forgot password? link)
+
+### ✅ Email Verification (NEW)
+- Verification token generated on registration
+- Verify Email page at /auth/verify-email
+- 24-hour token expiry
+- Resend verification option
+- emailVerified status tracked in user profile
+
+### ✅ Real-time Notifications (NEW)
+- Notifications dropdown in navigation (bell icon)
+- WebSocket connection for real-time updates
+- Welcome notification on registration
+- Login notifications for security tracking
+- Mark as read/unread functionality
+- Clear all notifications option
+- Browser notification permission support
 
 ## Credentials
 - **Admin Panel:** admin@havosec.com / password123

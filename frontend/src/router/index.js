@@ -70,6 +70,24 @@ const routes = [
     component: Register,
     meta: { public: true, hideForAuth: true }
   },
+  {
+    path: '/auth/forgot-password',
+    name: 'ForgotPassword',
+    component: ForgotPassword,
+    meta: { public: true, hideForAuth: true }
+  },
+  {
+    path: '/auth/reset-password',
+    name: 'ResetPassword',
+    component: ResetPassword,
+    meta: { public: true }
+  },
+  {
+    path: '/auth/verify-email',
+    name: 'VerifyEmail',
+    component: VerifyEmail,
+    meta: { public: true }
+  },
 
   // Dashboard routes (require authentication)
   {

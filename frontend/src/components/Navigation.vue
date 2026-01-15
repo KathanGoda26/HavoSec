@@ -130,6 +130,7 @@ import { useThemeStore } from "@/stores/theme";
 import { useAuthStore } from "@/stores/auth";
 import { SunIcon, MoonIcon } from "@heroicons/vue/24/outline";
 import LuxuryButton from "@/components/LuxuryButton.vue";
+import NotificationsDropdown from "@/components/NotificationsDropdown.vue";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 

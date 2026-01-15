@@ -33,4 +33,6 @@ async def update_content(section: str, request: Request):
         upsert=True
     )
     
-    return {"message": "Content updated successfully", "section": section}
+    # Return updated content
+    updated = await db.website_content.find_one({"section": section}, {"_id": 0})
+    return {"message": "Content updated successfully", "section": section, "content": updated}

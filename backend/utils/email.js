@@ -36,7 +36,7 @@ const sendEmail = async ({ to, subject, text, html }) => {
     const transporter = createTransporter();
     
     const mailOptions = {
-      from: process.env.EMAIL_FROM || process.env.EMAIL_USER || 'noreply@lockshield.com',
+      from: process.env.EMAIL_FROM || process.env.EMAIL_USER || 'noreply@havosec.com',
       to,
       subject,
       text,

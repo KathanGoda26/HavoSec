@@ -81,13 +81,13 @@
               Remember me
             </label>
             
-            <button 
-              type="button" 
+            <router-link 
+              to="/auth/forgot-password" 
               class="forgot-password-link"
               data-testid="forgot-password-link"
             >
               Forgot password?
-            </button>
+            </router-link>
           </div>
 
           <LuxuryButton 

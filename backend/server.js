@@ -78,6 +78,10 @@ app.use('/api/content', contentRoutes);
 app.use('/api/blog', blogRoutes);
 app.use('/api/demo', demoRequestsRoutes);
 
+// Client auth and dashboard routes (for website users)
+app.use('/api/auth', clientAuthRoutes);
+app.use('/api/dashboard', clientDashboardRoutes);
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', service: 'HavoSec API', timestamp: new Date().toISOString() });

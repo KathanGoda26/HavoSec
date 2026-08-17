@@ -1,0 +1,7 @@
+export { default as Home } from '@/views/Home'
+export { default as About } from '@/views/About'
+export { default as Blog } from '@/views/Blog'
+export { default as BookDemo } from '@/views/BookDemo'
+export { default as Pricing } from '@/views/Pricing'
+export { default as VulnerabilityDetail } from '@/views/VulnerabilityDetail'
+export { default as NotFound } from '@/views/NotFound'

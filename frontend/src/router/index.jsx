@@ -2,26 +2,32 @@ import React, { useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
 
-import Home from '@/views/Home'
-import About from '@/views/About'
-import Blog from '@/views/Blog'
-import BookDemo from '@/views/BookDemo'
-import Pricing from '@/views/Pricing'
-import VulnerabilityDetail from '@/views/VulnerabilityDetail'
-import NotFound from '@/views/NotFound'
-import Login from '@/views/auth/Login'
-import ForgotPassword from '@/views/auth/ForgotPassword'
-import ResetPassword from '@/views/auth/ResetPassword'
-import VerifyEmail from '@/views/auth/VerifyEmail'
-import Dashboard from '@/views/dashboard/Dashboard'
-import Overview from '@/views/dashboard/Overview'
-import AttackInsights from '@/views/dashboard/AttackInsights'
-import DefenseMetrics from '@/views/dashboard/DefenseMetrics'
-import SystemHealth from '@/views/dashboard/SystemHealth'
-import ActivityLogs from '@/views/dashboard/ActivityLogs'
-import Settings from '@/views/dashboard/Settings'
-import ScanResults from '@/views/dashboard/ScanResults'
-import ArchitectureMap from '@/views/dashboard/ArchitectureMap'
+import {
+  Home,
+  About,
+  Blog,
+  BookDemo,
+  Pricing,
+  VulnerabilityDetail,
+  NotFound,
+} from '@/pages/public'
+import {
+  Login,
+  ForgotPassword,
+  ResetPassword,
+  VerifyEmail,
+} from '@/pages/auth'
+import {
+  Dashboard,
+  Overview,
+  AttackInsights,
+  DefenseMetrics,
+  SystemHealth,
+  ActivityLogs,
+  Settings,
+  ScanResults,
+  ArchitectureMap,
+} from '@/pages/dashboard'
 
 function AuthBoundary({ children, guest = false }) {
   const location = useLocation()

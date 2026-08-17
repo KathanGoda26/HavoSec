@@ -78,8 +78,11 @@ function Login() {
 
       if (result.success) {
         const queryParams = new URLSearchParams(location.search)
-        const redirect = queryParams.get('redirect') || '/dashboard/overview'
-        navigate(redirect)
+        const requestedRedirect = queryParams.get('redirect')
+        const redirect = requestedRedirect?.startsWith('/') && !requestedRedirect.startsWith('//')
+          ? requestedRedirect
+          : '/dashboard/overview'
+        navigate(redirect, { replace: true })
       } else {
         setError(result.error || 'Login failed')
       }

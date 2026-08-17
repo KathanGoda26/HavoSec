@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from contextlib import asynccontextmanager
@@ -13,8 +13,6 @@ if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
 load_dotenv()
-# print("JWT_SECRET:", os.environ.get("JWT_SECRET"))
-# print("ADMIN_JWT_SECRET:", os.environ.get("ADMIN_JWT_SECRET"))
 
 # Import routes
 from routes.admin_auth import router as admin_auth_router
@@ -27,7 +25,6 @@ from routes.client_dashboard import router as client_dashboard_router
 from routes.uploads import router as uploads_router
 from routes.password_reset import router as password_reset_router
 from routes.notifications import router as notifications_router
-from routes.security import router as security_router
 from routes.architecture import router as architecture_router
 from routes.seo import router as seo_router
 
@@ -94,7 +91,6 @@ app.include_router(client_dashboard_router, prefix="/api/dashboard", tags=["Clie
 app.include_router(uploads_router, prefix="/api/uploads", tags=["File Uploads"])
 app.include_router(password_reset_router, prefix="/api/auth", tags=["Password Reset & Verification"])
 app.include_router(notifications_router, prefix="/api/notifications", tags=["Notifications"])
-app.include_router(security_router, prefix="/api/security", tags=["Security Scanning"])
 app.include_router(architecture_router, tags=["Architecture Maps"])
 app.include_router(seo_router, prefix="/api/seo", tags=["SEO Management"])
 app.include_router(seo_router, prefix="/api/admin/seo", tags=["Admin SEO Management"])

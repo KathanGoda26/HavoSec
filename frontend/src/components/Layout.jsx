@@ -1,32 +1,25 @@
-import React, { useMemo } from 'react'
+import React from 'react'
 import { useLocation } from 'react-router-dom'
 import Navigation from '@/components/Navigation'
 import Footer from '@/components/Footer'
 import AppRoutes from '@/router/index'
 
 function Layout() {
-  const location = useLocation()
-
-  const showNavigation = useMemo(() => {
-    const hideNavRoutes = ['/auth/login']
-    const isDashboard = location.pathname.startsWith('/dashboard')
-    return !hideNavRoutes.includes(location.pathname) && !isDashboard
-  }, [location.pathname])
+  const { pathname } = useLocation()
+  const isDashboard = pathname.startsWith('/dashboard')
+  const isAuth = pathname.startsWith('/auth/')
+  const showPublicChrome = !isDashboard && !isAuth
 
   return (
-    <div className="layout-container">
-      {showNavigation && <Navigation />}
+    <div className={`layout-container ${isDashboard ? 'dashboard-layout' : 'public-layout'}`}>
+      {showPublicChrome && <Navigation />}
 
-      <main className={`main-content ${showNavigation ? 'with-nav' : 'full-page'}`}>
+      <main className={`main-content ${showPublicChrome ? 'with-nav' : 'full-page'}`}>
         <AppRoutes />
       </main>
 
-      {showNavigation && <Footer />}
-
-      {/* Global Toast/Notification Container */}
-      <div id="toast-container" className="toast-container">
-        {/* Toasts will be dynamically added here */}
-      </div>
+      {showPublicChrome && <Footer />}
+      <div id="toast-container" className="toast-container" />
     </div>
   )
 }

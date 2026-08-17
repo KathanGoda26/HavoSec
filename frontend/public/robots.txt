@@ -1,0 +1,26 @@
+# HavoSec - robots.txt
+# This file tells search engines which pages to crawl
+
+# Allow all search engines
+User-agent: *
+
+# Allow crawling of public pages
+Allow: /
+Allow: /about
+Allow: /features
+Allow: /pricing
+Allow: /blog
+Allow: /contact
+
+# Disallow private/sensitive areas
+Disallow: /dashboard/
+Disallow: /auth/
+Disallow: /api/
+Disallow: /*.json$
+Disallow: /*.xml$
+
+# Sitemap location
+Sitemap: https://havosec.com/sitemap.xml
+
+# Crawl delay (optional - prevents aggressive crawling)
+Crawl-delay: 1

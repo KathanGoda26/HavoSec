@@ -72,22 +72,12 @@ function Home() {
   const [featActiveIdx, setFeatActiveIdx] = useState(0)
 
   // Refs
-  const lockFloatRef = useRef(null)
-  const lockRef = useRef(null)
   const heroRef = useRef(null)
-  const marqueeWrapRef = useRef(null)
   const achieveStoryRef = useRef(null)
   const featuresSectionRef = useRef(null)
-  const featHeadlineRef = useRef(null)
   const featContentRef = useRef(null)
   const headlineRef = useRef(null)
   const panelRefs = useRef([])
-
-  const setLockRot = (y, z = 0) => {
-    if (lockRef.current) {
-      lockRef.current.setScrollRotation(y, z)
-    }
-  }
 
   // Computed values derived from contentStore
   const heroTitle = useMemo(() => {
@@ -97,8 +87,6 @@ function Home() {
 
   const animationSettings = useMemo(() => ({
     modelPath: store.hero?.animation?.modelPath || '/lock.glb',
-    primaryColor: store.hero?.animation?.primaryColor || '#673ee6',
-    secondaryColor: store.hero?.animation?.secondaryColor || '#00b090',
     scale: store.hero?.animation?.scale || 3,
     autoRotate: true,
     rotationSpeed: store.hero?.animation?.rotationSpeed || 0.005,
@@ -160,57 +148,41 @@ function Home() {
 
   // Scroll Animations
   useEffect(() => {
-    const lockFloat = lockFloatRef.current
-    const marqueeWrap = marqueeWrapRef.current
     const hero = heroRef.current
     const achieveStory = achieveStoryRef.current
     const featuresSection = featuresSectionRef.current
-    const featHeadline = featHeadlineRef.current
     const featContent = featContentRef.current
 
-    if (!lockFloat || !marqueeWrap || !hero || !achieveStory || !featuresSection) return
+    if (!hero || !achieveStory || !featuresSection) return
 
     // Clear transforms left by a hot reload or an earlier animation version.
     // Only the complete heading groups are allowed to own a heading transform.
     const achieveHeading = headlineRef.current?.querySelector('.achieve-heading')
-    const featureHeading = featHeadline?.querySelector('.feature-heading')
     const titleLines = [
       headlineRef.current?.querySelector('.achieve-headline'),
-      featHeadline?.querySelector('.feat-headline'),
     ].filter(Boolean)
     gsap.set(titleLines, { clearProps: 'transform,opacity' })
-    gsap.set([achieveHeading, featureHeading].filter(Boolean), { x: '110vw', autoAlpha: 0 })
-
-    // Lock stays centered and does not participate in scroll-driven motion.
-    gsap.set(lockFloat, { xPercent: -50, yPercent: -50 })
-
-    // Phase 1->2: keep steady center
-    const stMarquee = ScrollTrigger.create({
-      trigger: marqueeWrap,
-      start: 'top 80%',
-      end: 'bottom 20%',
-      scrub: true,
-      onUpdate() {
-        gsap.set(lockFloat, { yPercent: -50 })
-      },
-    })
+    gsap.set([achieveHeading].filter(Boolean), { x: '110vw', autoAlpha: 0 })
 
     // HERO -> ACHIEVEMENTS
-    const HEADING_PHASE = 0.2
+    // Reserve roughly two viewport-heights for the heading sweep. The
+    // remaining distance still gives each achievement card one full beat.
+    const HEADING_PHASE = 1 / 3
 
     // ACHIEVEMENTS CYCLE
     const stAchieve = ScrollTrigger.create({
       trigger: achieveStory,
       start: 'top top',
       end: 'bottom bottom',
-      scrub: 1.2,
+      scrub: 1.8,
       onUpdate(self) {
         const p = self.progress
         const heading = headlineRef.current?.querySelector('.achieve-heading')
 
         if (p < HEADING_PHASE) {
           const hp = p / HEADING_PHASE
-          const xVW = 100 - hp * 310
+          // Travel from 100vw to -120vw with no position jump at the handoff.
+          const xVW = 100 - hp * 220
           if (heading) {
             gsap.set(heading, { x: `${xVW}vw`, autoAlpha: 1 })
           }
@@ -235,7 +207,7 @@ function Home() {
               if (loc < 0.2) {
                 op = loc / 0.2
                 y = 40 * (1 - op)
-              } else if (loc > 0.8) {
+              } else if (loc > 0.8 && i < num - 1) {
                 op = (1 - loc) / 0.2
                 y = 0
               } else {
@@ -267,43 +239,17 @@ function Home() {
       onUpdate(self) {
         const p = self.progress
         const totalFeatures = displayFeatures.length
-        const headingPhase = 1 / (totalFeatures + 1)
-        const heading = featHeadline?.querySelector('.feature-heading')
+        if (featContent) gsap.set(featContent, { opacity: 1, y: 0 })
 
-        if (p < headingPhase) {
-          const hp = p / headingPhase
-          const xVW = 100 - hp * 310
-          if (heading) gsap.set(heading, { x: `${xVW}vw`, autoAlpha: 1 })
-          if (featContent) gsap.set(featContent, { opacity: 0, y: 150 })
-        } else {
-          if (heading) gsap.set(heading, { x: '-120vw', autoAlpha: 0 })
-
-          const pp = (p - headingPhase) / (1 - headingPhase)
-          const entryFraction = 0.08
-
-          if (pp < entryFraction) {
-            const entryP = pp / entryFraction
-            if (featContent) {
-              gsap.set(featContent, {
-                opacity: Math.pow(entryP, 1.5),
-                y: 150 * (1 - entryP),
-              })
-            }
-          } else {
-            if (featContent) gsap.set(featContent, { opacity: 1, y: 0 })
-          }
-
-          const idx = Math.min(Math.floor(pp * totalFeatures), totalFeatures - 1)
-          if (idx !== lastActiveIdx) {
-            lastActiveIdx = idx
-            setFeatActiveIdx(idx)
-          }
+        const idx = Math.min(Math.floor(p * totalFeatures), totalFeatures - 1)
+        if (idx !== lastActiveIdx) {
+          lastActiveIdx = idx
+          setFeatActiveIdx(idx)
         }
       },
     })
 
     return () => {
-      stMarquee.kill()
       stAchieve.kill()
       stFeaturesCycle.kill()
     }
@@ -315,18 +261,6 @@ function Home() {
         title="A Autonomous Cybersecurity Platform"
         description="Protect your organization with HavoSec's comprehensive cybersecurity solutions."
       />
-
-      <div className="lock-float" ref={lockFloatRef}>
-        <Lock3D
-          ref={lockRef}
-          modelPath={animationSettings.modelPath}
-          primaryColor={animationSettings.primaryColor}
-          secondaryColor={animationSettings.secondaryColor}
-          scale={animationSettings.scale}
-          autoRotate={false}
-          rotationSpeed={animationSettings.rotationSpeed}
-        />
-      </div>
 
       <section className="hero-section" ref={heroRef} data-testid="hero-section">
         <div className="hero-col hero-left hero-animate">
@@ -341,6 +275,14 @@ function Home() {
         </div>
 
         <div className="hero-col hero-center-col">
+          <div className="lock-float">
+            <Lock3D
+              modelPath={animationSettings.modelPath}
+              scale={animationSettings.scale}
+              autoRotate={false}
+              rotationSpeed={animationSettings.rotationSpeed}
+            />
+          </div>
           <div className="hero-bg-visuals">
             <div className="bg-ring ring-1"></div>
             <div className="bg-ring ring-2"></div>
@@ -369,7 +311,7 @@ function Home() {
         </div>
       </section>
 
-      <div className="marquee-wrap" ref={marqueeWrapRef}>
+      <div className="marquee-wrap">
         <MarqueeStrip />
       </div>
 
@@ -407,20 +349,12 @@ function Home() {
         className="feat-story"
         ref={featuresSectionRef}
         data-testid="features-section"
-        style={{ height: `calc((${displayFeatures.length} + 1) * 100vh)` }}
+        style={{ height: `calc(${displayFeatures.length} * 100vh)` }}
       >
         <div className="feat-sticky">
-          <div className="feat-headline-wrap" ref={featHeadlineRef}>
-            <div className="story-heading feature-heading">
-              <span className="story-kicker">Always one move ahead</span>
-              <span className="feat-headline">Advanced<br />Security Features</span>
-              <p>A unified security layer that sees, decides and acts at machine speed.</p>
-            </div>
-          </div>
-
           <div className="feat-content" ref={featContentRef}>
             <div className="feat-left">
-              <span className="feat-eyebrow">Security command centre</span>
+              <h2 className="feat-card-title">Advanced<br />Security Features</h2>
               <ul className="feat-list">
                 {displayFeatures.map((feature, i) => (
                   <li

@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
+import { getAuthenticatedHome } from '@/constants/auth'
 import DynamicSEO from '@/components/DynamicSEO'
 import LuxuryButton from '@/components/LuxuryButton'
 import {
@@ -81,7 +82,7 @@ function Login() {
         const requestedRedirect = queryParams.get('redirect')
         const redirect = requestedRedirect?.startsWith('/') && !requestedRedirect.startsWith('//')
           ? requestedRedirect
-          : '/dashboard/overview'
+          : getAuthenticatedHome(result.user?.role)
         navigate(redirect, { replace: true })
       } else {
         setError(result.error || 'Login failed')

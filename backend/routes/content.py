@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from utils.auth import require_roles
+from utils.roles import UserRole
 from datetime import datetime
 
 router = APIRouter()
@@ -20,7 +22,7 @@ async def get_content(section: str, request: Request):
     
     return content
 
-@router.put("/{section}")
+@router.put("/{section}", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def update_content(section: str, request: Request):
     db = request.app.state.db
     data = await request.json()

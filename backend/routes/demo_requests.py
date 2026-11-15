@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from utils.auth import require_roles
+from utils.roles import UserRole
 from datetime import datetime
 from bson import ObjectId
 
@@ -9,7 +11,7 @@ async def get_demo_stats(db):
     pending = await db.demo_requests.count_documents({"status": "new"})
     return {"total": total, "pending": pending}
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def get_demo_requests(request: Request, status: str = None, limit: int = 50, offset: int = 0):
     db = request.app.state.db
     
@@ -26,7 +28,7 @@ async def get_demo_requests(request: Request, status: str = None, limit: int = 5
     
     return {"requests": requests, "total": total}
 
-@router.get("/{request_id}")
+@router.get("/{request_id}", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def get_demo_request(request_id: str, request: Request):
     db = request.app.state.db
     
@@ -64,7 +66,7 @@ async def create_demo_request(request: Request):
         "id": str(result.inserted_id)
     }
 
-@router.put("/{request_id}")
+@router.put("/{request_id}", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def update_demo_request(request_id: str, request: Request):
     db = request.app.state.db
     data = await request.json()
@@ -86,7 +88,7 @@ async def update_demo_request(request_id: str, request: Request):
     
     return {"message": "Demo request updated", "request": updated_request}
 
-@router.delete("/{request_id}")
+@router.delete("/{request_id}", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def delete_demo_request(request_id: str, request: Request):
     db = request.app.state.db
     

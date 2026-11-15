@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
+from utils.roles import UserRole
 from datetime import datetime
 from bson import ObjectId
 
@@ -20,8 +21,10 @@ class AdminUser(BaseModel):
     password: str
     firstName: str
     lastName: str
-    role: str = "admin"
-    permissions: List[str] = []
+    role: UserRole = UserRole.ADMIN
+    status: str = "active"
+    organizationId: Optional[str] = None
+    permissions: List[str] = Field(default_factory=list)
     
 class AdminUserInDB(AdminUser):
     id: Optional[str] = None
@@ -38,7 +41,9 @@ class ClientUser(BaseModel):
     firstName: str
     lastName: str
     company: str
-    role: str = "viewer"
+    role: UserRole = UserRole.USER
+    status: str = "active"
+    organizationId: Optional[str] = None
 
 class ClientUserInDB(ClientUser):
     id: Optional[str] = None

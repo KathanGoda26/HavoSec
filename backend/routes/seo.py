@@ -4,6 +4,8 @@ Allows admin to manage SEO metadata for frontend pages
 """
 
 from fastapi import APIRouter, HTTPException, Request, Depends
+from utils.auth import require_roles
+from utils.roles import UserRole
 from pydantic import BaseModel, HttpUrl
 from typing import Optional, List, Dict
 from datetime import datetime
@@ -64,7 +66,7 @@ async def get_global_seo(request: Request):
     return global_seo.get("settings", GlobalSEO().dict())
 
 
-@router.put("/global")
+@router.put("/global", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def update_global_seo(settings: GlobalSEO, request: Request):
     """
     Update global SEO settings (admin only)
@@ -120,7 +122,7 @@ async def get_page_seo(page: str, request: Request):
     return page_seo
 
 
-@router.put("/pages/{page}")
+@router.put("/pages/{page}", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def update_page_seo(page: str, seo: SEOMetadata, request: Request):
     """
     Update SEO metadata for a specific page (admin only)
@@ -146,7 +148,7 @@ async def update_page_seo(page: str, seo: SEOMetadata, request: Request):
     }
 
 
-@router.delete("/pages/{page}")
+@router.delete("/pages/{page}", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def delete_page_seo(page: str, request: Request):
     """
     Delete custom SEO metadata for a page (reverts to defaults)
@@ -167,7 +169,7 @@ async def delete_page_seo(page: str, request: Request):
     }
 
 
-@router.post("/pages/bulk")
+@router.post("/pages/bulk", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def bulk_update_seo(bulk_update: BulkSEOUpdate, request: Request):
     """
     Bulk update SEO metadata for multiple pages

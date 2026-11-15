@@ -1,12 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import axios from 'axios'
+import apiClient from '@/services/apiClient'
 import { useAuthStore } from '@/stores/authStore'
 import DynamicSEO from '@/components/DynamicSEO'
-
-const API_BASE = (
-  import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
-).replace(/\/$/, '')
 
 function VerifyEmail() {
   const location = useLocation()
@@ -29,7 +25,7 @@ function VerifyEmail() {
 
     async function verify() {
       try {
-        await axios.post(`${API_BASE}/auth/verify-email`, { token })
+        await apiClient.post('/auth/verify-email', { token })
         setIsSuccess(true)
 
         // Update auth store if user is logged in
@@ -55,7 +51,7 @@ function VerifyEmail() {
     setIsResending(true)
 
     try {
-      await axios.post(`${API_BASE}/auth/send-verification`, {
+      await apiClient.post('/auth/send-verification', {
         email: user.email,
       })
       alert('Verification email sent! Please check your inbox.')

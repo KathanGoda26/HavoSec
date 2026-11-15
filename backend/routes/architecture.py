@@ -4,6 +4,7 @@ Generates software architecture diagrams from scan results
 """
 
 from fastapi import APIRouter, HTTPException, Depends, status
+from utils.auth import get_current_user, organization_scope
 from typing import List, Dict, Optional
 from pydantic import BaseModel
 from datetime import datetime
@@ -13,7 +14,7 @@ from pymongo import MongoClient
 
 load_dotenv()
 
-router = APIRouter(prefix="/api/architecture", tags=["architecture"])
+router = APIRouter(prefix="/api/architecture", tags=["architecture"], dependencies=[Depends(get_current_user)])
 
 # MongoDB connection
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/")
@@ -126,17 +127,18 @@ def calculate_node_positions(num_nodes: int, canvas_width: int = 800, canvas_hei
     return positions
 
 
-def extract_architecture_from_scan(execution):
+def extract_architecture_from_scan(execution, user):
     """Extract architecture components from scan execution data"""
     nodes = []
     connections = []
     node_map = {}
     
     # Get agent results for this execution
-    agent_results = list(db.agent_results.find({"execution_id": execution["execution_id"]}))
+    tenant_query = organization_scope(user)
+    agent_results = list(db.agent_results.find({"execution_id": execution["execution_id"], **tenant_query}))
     
     # Get vulnerabilities
-    vulnerabilities = list(db.vulnerabilities.find({"execution_id": execution["execution_id"]}))
+    vulnerabilities = list(db.vulnerabilities.find({"execution_id": execution["execution_id"], **tenant_query}))
     vuln_by_component = {}
     for vuln in vulnerabilities:
         component = vuln.get("affected_component", "Unknown")
@@ -297,12 +299,12 @@ def extract_architecture_from_scan(execution):
 
 # API Endpoints
 @router.get("/{execution_id}", response_model=ArchitectureResponse)
-async def get_architecture_by_execution(execution_id: str):
+async def get_architecture_by_execution(execution_id: str, current_user=Depends(get_current_user)):
     """
     Get architecture map for a specific execution
     """
     # Find execution
-    execution = db.executions.find_one({"execution_id": execution_id})
+    execution = db.executions.find_one({"execution_id": execution_id, **organization_scope(current_user)})
     if not execution:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -310,7 +312,7 @@ async def get_architecture_by_execution(execution_id: str):
         )
     
     # Extract architecture
-    architecture = extract_architecture_from_scan(execution)
+    architecture = extract_architecture_from_scan(execution, current_user)
     
     # Calculate statistics
     vulnerable_components = sum(1 for node in architecture.nodes if node.vulnerabilities > 0)
@@ -327,12 +329,12 @@ async def get_architecture_by_execution(execution_id: str):
 
 
 @router.get("/", response_model=List[Dict])
-async def list_available_architectures():
+async def list_available_architectures(current_user=Depends(get_current_user)):
     """
     List all available architecture maps (completed scans)
     """
     executions = list(db.executions.find(
-        {"status": "completed"},
+        {"status": "completed", **organization_scope(current_user)},
         {"execution_id": 1, "target": 1, "created_at": 1, "status": 1}
     ).sort("created_at", -1).limit(50))
     

@@ -6,7 +6,7 @@ import AppRoutes from '@/router/index'
 
 function Layout() {
   const { pathname } = useLocation()
-  const isDashboard = pathname.startsWith('/dashboard')
+  const isDashboard = /^\/(dashboard|admin)(\/|$)/.test(pathname)
   const isAuth = pathname.startsWith('/auth/')
   const showPublicChrome = !isDashboard && !isAuth
 

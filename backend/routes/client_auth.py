@@ -1,32 +1,10 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime, timedelta
 import bcrypt
-# import jwt
-from jose import jwt, ExpiredSignatureError, JWTError
-import os
-import secrets
+from utils.auth import create_access_token, get_current_user, serialize_user
 from pymongo.errors import ServerSelectionTimeoutError, AutoReconnect
 
 router = APIRouter()
-
-JWT_SECRET = os.environ.get("JWT_SECRET", "havosec-super-secret-jwt-key-2025")
-
-def create_token(user_id: str):
-    payload = {
-        "userId": user_id,
-        "exp": datetime.utcnow() + timedelta(days=7)
-    }
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
-
-def verify_token(token: str):
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        return payload
-    except ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
 
 @router.post("/login")
 async def login(request: Request):
@@ -41,13 +19,9 @@ async def login(request: Request):
             raise HTTPException(status_code=400, detail="Email and password required")
         
         normalized_email = email.strip().lower()
-        # The application has both client users and administrator users. The
-        # shared login screen must resolve either account type.
         user_collection = db.users
+        account_source = "users"
         user = await user_collection.find_one({"email": normalized_email})
-        if not user:
-            user_collection = db.admin_users
-            user = await user_collection.find_one({"email": normalized_email})
         if not user:
             raise HTTPException(status_code=401, detail="Invalid credentials")
         
@@ -65,7 +39,7 @@ async def login(request: Request):
                 if lock_until > datetime.utcnow():
                     raise HTTPException(status_code=423, detail="Account temporarily locked")
         
-        if not user.get("isActive", True):
+        if not user.get("isActive", True) or user.get("status", "active") != "active":
             raise HTTPException(status_code=403, detail="Account is deactivated")
         
         # Robust password type checks (handles both str and bytes)
@@ -104,7 +78,7 @@ async def login(request: Request):
         )
         
         user_id = str(user["_id"])
-        token = create_token(user_id)
+        token = create_access_token(user_id, account_source)
         
         # Create login success notification
         await db.notifications.insert_one({
@@ -120,15 +94,7 @@ async def login(request: Request):
             "success": True,
             "message": "Login successful",
             "token": token,
-            "user": {
-                "id": user_id,
-                "email": user["email"],
-                "firstName": user.get("firstName", ""),
-                "lastName": user.get("lastName", ""),
-                "role": user.get("role", "viewer"),
-                "company": user.get("company", ""),
-                "emailVerified": user.get("emailVerified", False)
-            }
+            "user": serialize_user(user, account_source)
         }
     except HTTPException as he:
         raise he
@@ -144,29 +110,5 @@ async def login(request: Request):
         raise HTTPException(status_code=500, detail="Unable to complete login. Please try again.") from e
 
 @router.get("/me")
-async def get_profile(request: Request):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="No token provided")
-    
-    token = auth_header.replace("Bearer ", "")
-    payload = verify_token(token)
-    
-    db = request.app.state.db
-    from bson import ObjectId
-    user = await db.users.find_one({"_id": ObjectId(payload["userId"])})
-    
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    return {
-        "user": {
-            "id": str(user["_id"]),
-            "email": user["email"],
-            "firstName": user.get("firstName", ""),
-            "lastName": user.get("lastName", ""),
-            "role": user.get("role", "viewer"),
-            "company": user.get("company", ""),
-            "emailVerified": user.get("emailVerified", False)
-        }
-    }
+async def get_profile(user=Depends(get_current_user)):
+    return {"user": user}

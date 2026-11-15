@@ -1,97 +1,34 @@
-from fastapi import APIRouter, HTTPException, Request, Depends
-from datetime import datetime, timedelta
+"""Compatibility admin login routes using the shared auth system."""
 import bcrypt
-# import jwt  <-- This was causing the conflict with the wrong 'jwt' library
-from jose import jwt, ExpiredSignatureError, JWTError
-import os
+from fastapi import APIRouter, Depends, HTTPException, Request
+from utils.auth import create_access_token, get_current_user, serialize_user
+from utils.roles import UserRole
 
 router = APIRouter()
 
-JWT_SECRET = os.environ.get("ADMIN_JWT_SECRET", "havosec-admin-super-secret-jwt-key-2025")
-
-def create_token(user_id: str, email: str):
-    payload = {
-        "user_id": user_id,
-        "email": email,
-        # "exp": datetime.utcnow() + timedelta(days=7)
-    }
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
-
-def verify_token(token: str):
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        return payload
-    except ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
 @router.post("/login")
 async def admin_login(request: Request):
-    db = request.app.state.db
     data = await request.json()
-    
-    email = data.get("email")
+    email = str(data.get("email", "")).strip().lower()
     password = data.get("password")
-    
-    try:
-        if not email or not password:
-            raise HTTPException(status_code=400, detail="Email and password required")
-        
-        user = await db.admin_users.find_one({"email": email})
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid credentials (user not found)")
-        
-        # Debug 1: Check password types
-        # print(f"Pass type: {type(password)}, Hash type: {type(user['password'])}")
-        
-        if not bcrypt.checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
-            raise HTTPException(status_code=401, detail="Invalid credentials (pw mismatch)")
-        
-        token = create_token(str(user["_id"]), user["email"])
-        
-        # Ensure token is string for JSON serialization
-        if isinstance(token, bytes):
-            token = token.decode('utf-8')
-        
-        return {
-            "success": True,
-            "token": token,
-            "admin": {
-                "id": str(user["_id"]),
-                "email": user["email"],
-                "firstName": user.get("firstName", ""),
-                "lastName": user.get("lastName", ""),
-                "role": user.get("role", "admin")
-            }
-        }
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email and password required")
+    user = await request.app.state.db.users.find_one({"email": email})
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    stored = user.get("password", "")
+    stored = stored.encode() if isinstance(stored, str) else stored
+    if not stored or not bcrypt.checkpw(password.encode(), stored):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if user.get("status", "active") != "active" or user.get("isActive", True) is False:
+        raise HTTPException(status_code=403, detail="Account is inactive")
+    safe_user = serialize_user(user, "users")
+    if safe_user["role"] not in {UserRole.SUPERADMIN.value, UserRole.ADMIN.value}:
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    return {"success": True, "token": create_access_token(str(user["_id"]), "users"), "admin": safe_user, "user": safe_user}
 
 @router.get("/me")
-async def get_current_user(request: Request):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="No token provided")
-    
-    token = auth_header.replace("Bearer ", "")
-    payload = verify_token(token)
-    
-    db = request.app.state.db
-    from bson import ObjectId
-    user = await db.admin_users.find_one({"_id": ObjectId(payload["user_id"])})
-    
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    return {
-        "user": {
-            "id": str(user["_id"]),
-            "email": user["email"],
-            "firstName": user.get("firstName", ""),
-            "lastName": user.get("lastName", ""),
-            "role": user.get("role", "admin")
-        }
-    }
+async def admin_me(user=Depends(get_current_user)):
+    if user["role"] not in {UserRole.SUPERADMIN.value, UserRole.ADMIN.value}:
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    return {"user": user}

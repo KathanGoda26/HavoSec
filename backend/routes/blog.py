@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from utils.auth import require_roles
+from utils.roles import UserRole
 from datetime import datetime
 from bson import ObjectId
 import re
@@ -20,8 +22,9 @@ async def get_blog_stats(db):
 async def get_posts(request: Request, status: str = None, limit: int = 10, offset: int = 0):
     db = request.app.state.db
     
-    query = {}
-    if status:
+    is_admin_request = request.url.path.startswith("/api/admin/")
+    query = {} if is_admin_request else {"status": "published"}
+    if status and is_admin_request:
         query["status"] = status
     
     cursor = db.blog_posts.find(query).sort("createdAt", -1).skip(offset).limit(limit)
@@ -39,7 +42,10 @@ async def get_post(post_id: str, request: Request):
     db = request.app.state.db
     
     try:
-        post = await db.blog_posts.find_one({"_id": ObjectId(post_id)})
+        query = {"_id": ObjectId(post_id)}
+        if not request.url.path.startswith("/api/admin/"):
+            query["status"] = "published"
+        post = await db.blog_posts.find_one(query)
     except:
         post = await db.blog_posts.find_one({"slug": post_id})
     
@@ -49,7 +55,7 @@ async def get_post(post_id: str, request: Request):
     post["id"] = str(post.pop("_id"))
     return {"post": post}
 
-@router.post("/")
+@router.post("/", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def create_post(request: Request):
     db = request.app.state.db
     data = await request.json()
@@ -75,7 +81,7 @@ async def create_post(request: Request):
     
     return {"message": "Post created", "post": post_doc}
 
-@router.put("/{post_id}")
+@router.put("/{post_id}", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def update_post(post_id: str, request: Request):
     db = request.app.state.db
     data = await request.json()
@@ -95,7 +101,7 @@ async def update_post(post_id: str, request: Request):
     
     return {"message": "Post updated"}
 
-@router.delete("/{post_id}")
+@router.delete("/{post_id}", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def delete_post(post_id: str, request: Request):
     db = request.app.state.db
     

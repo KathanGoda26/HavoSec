@@ -1,0 +1,17 @@
+rules:
+  - id: havosec.python.subprocess-shell-true
+    languages: [python]
+    message: Avoid running subprocesses through a shell; use a fixed argument array.
+    severity: ERROR
+    patterns:
+      - pattern: subprocess.$FUNC(..., shell=True, ...)
+  - id: havosec.python.eval
+    languages: [python]
+    message: Avoid evaluating untrusted text as Python code.
+    severity: WARNING
+    pattern: eval(...)
+  - id: havosec.javascript.eval
+    languages: [javascript, typescript]
+    message: Avoid evaluating untrusted text as JavaScript code.
+    severity: WARNING
+    pattern: eval(...)

@@ -8,7 +8,7 @@ test_reports/
 *_backup/
 backend_node/
 memory/
-tests/
+/tests/
 
 # OS Files
 .DS_Store
@@ -54,6 +54,7 @@ lerna-debug.log*
 *.temp
 .cache/
 .temp/
+.tools/
 
 # Build outputs (handled by subproject gitignores)
 dist/

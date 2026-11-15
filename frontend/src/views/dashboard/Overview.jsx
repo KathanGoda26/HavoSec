@@ -1,385 +1,57 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { Chart, registerables } from 'chart.js'
-import { useDashboardStore } from '@/stores/dashboardStore'
-import { useContentStore } from '@/stores/contentStore'
 import Widget from '@/components/ui/Widget'
 import Card from '@/components/ui/Card'
-import SecurityScanner from '@/components/SecurityScanner'
-import {
-  ShieldCheckIcon,
-  ClockIcon,
-  ExclamationTriangleIcon,
-  HeartIcon,
-  BugAntIcon,
-  FireIcon,
-  EyeIcon,
-  ChartBarIcon,
-} from '@heroicons/react/24/outline'
+import ResourceState from '@/components/ui/ResourceState'
+import usePollingResource from '@/hooks/usePollingResource'
+import { useThemeStore } from '@/stores/themeStore'
+import { ShieldCheckIcon, ClockIcon, ExclamationTriangleIcon, ChartBarIcon } from '@heroicons/react/24/outline'
+import { FINDING_STATUS_LABELS } from '@/dashboard/findings/status'
+import { RUN_STATUS_LABELS } from '@/dashboard/security-runs/status'
+import { ACTIVITY_TYPES } from '@/dashboard/activity/activity'
+import { SEVERITY_COLORS } from '@/dashboard/overview/overview'
+import { securityApi, displayDate } from '@/services/securityApi'
 
 Chart.register(...registerables)
 
-function formatDate(dateString) {
-  const date = new Date(dateString)
-  const now = new Date()
-  const diff = now - date
-
-  if (diff < 60000) return 'Just now'
-  if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago'
-  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago'
-  return Math.floor(diff / 86400000) + 'd ago'
-}
-
-function getEventIcon(eventType) {
-  const icons = {
-    attack_blocked: ShieldCheckIcon,
-    malware_detected: BugAntIcon,
-    ddos_mitigated: FireIcon,
-    intrusion_attempt: ExclamationTriangleIcon,
-    vulnerability_scan: EyeIcon,
-  }
-  const Icon = icons[eventType] || ExclamationTriangleIcon
-  return <Icon className="icon-xs" />
-}
-
 function Overview() {
-  const dashboardStore = useDashboardStore()
-  const contentStore = useContentStore()
-
-  const timelineCanvasRef = useRef(null)
-  const attackTypesCanvasRef = useRef(null)
-
-  const [loading, setLoading] = useState(true)
-  const [recentEvents, setRecentEvents] = useState([])
-
-  const overview = useDashboardStore(state => state.overview)
-
-  // Dynamic content from content store with fallbacks
-  const pageTitle = useMemo(() => {
-    return contentStore.clientDashboard?.pageTitle || 'Security Overview'
-  }, [contentStore.clientDashboard?.pageTitle])
-
-  const pageDescription = useMemo(() => {
-    return (
-      contentStore.clientDashboard?.pageDescription ||
-      'Real-time security monitoring and threat analysis'
-    )
-  }, [contentStore.clientDashboard?.pageDescription])
-
-  const stats = useMemo(() => {
-    return (
-      contentStore.clientDashboard?.stats || [
-        { label: 'Total Events' },
-        { label: 'Events (24h)' },
-        { label: 'Blocked Attacks' },
-        { label: 'System Uptime' },
-      ]
-    )
-  }, [contentStore.clientDashboard?.stats])
-
-  const threatActivityEnabled = useMemo(() => {
-    return contentStore.clientDashboard?.charts?.threatActivity?.enabled !== false
-  }, [contentStore.clientDashboard?.charts?.threatActivity?.enabled])
-
-  const threatActivityTitle = useMemo(() => {
-    return (
-      contentStore.clientDashboard?.charts?.threatActivity?.title ||
-      'Threat Activity (Last 7 Days)'
-    )
-  }, [contentStore.clientDashboard?.charts?.threatActivity?.title])
-
-  const attackTypesEnabled = useMemo(() => {
-    return contentStore.clientDashboard?.charts?.attackTypes?.enabled !== false
-  }, [contentStore.clientDashboard?.charts?.attackTypes?.enabled])
-
-  const attackTypesTitle = useMemo(() => {
-    return (
-      contentStore.clientDashboard?.charts?.attackTypes?.title ||
-      'Attack Types Distribution'
-    )
-  }, [contentStore.clientDashboard?.charts?.attackTypes?.title])
-
-  const showCharts = useMemo(() => {
-    return threatActivityEnabled || attackTypesEnabled
-  }, [threatActivityEnabled, attackTypesEnabled])
+  const severityCanvasRef = useRef(null)
+  const isDark = useThemeStore(state => state.isDark)
+  const { data, loading, error, reload } = usePollingResource(() => securityApi.getOverview({}), [])
+  const severity = data ? Object.entries(data.severity_counts).map(([name, count]) => ({ name, count })) : []
 
   useEffect(() => {
-    let active = true
+    if (!severityCanvasRef.current || !data?.open_findings) return undefined
+    const chart = new Chart(severityCanvasRef.current, {
+      type: 'doughnut',
+      data: { labels: severity.map(item => item.name), datasets: [{ data: severity.map(item => item.count), backgroundColor: severity.map(item => SEVERITY_COLORS[item.name] || '#64748b') }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: isDark ? '#c4bfd4' : '#5c566b' } } } },
+    })
+    return () => chart.destroy()
+  }, [data, isDark])
 
-    async function loadData() {
-      try {
-        await dashboardStore.fetchOverview()
-        try {
-          if (contentStore.fetchClientDashboard) {
-            await contentStore.fetchClientDashboard()
-          }
-        } catch (contentError) {
-          console.warn(
-            'Could not load client dashboard content, using defaults:',
-            contentError
-          )
-        }
-
-        if (active) {
-          setRecentEvents([
-            {
-              id: '1',
-              eventType: 'attack_blocked',
-              severity: 'high',
-              description: 'SQL injection attack blocked on login endpoint',
-              source: { ip: '192.168.1.100' },
-              status: 'blocked',
-              createdAt: new Date(Date.now() - 300000), // 5 minutes ago
-            },
-            {
-              id: '2',
-              eventType: 'malware_detected',
-              severity: 'critical',
-              description: 'Malware signature detected in file upload',
-              source: { ip: '10.0.0.15' },
-              status: 'quarantined',
-              createdAt: new Date(Date.now() - 900000), // 15 minutes ago
-            },
-            {
-              id: '3',
-              eventType: 'ddos_mitigated',
-              severity: 'medium',
-              description: 'DDoS attack attempt mitigated successfully',
-              source: { ip: '203.0.113.50' },
-              status: 'resolved',
-              createdAt: new Date(Date.now() - 1800000), // 30 minutes ago
-            },
-          ])
-          setLoading(false)
-        }
-      } catch (error) {
-        console.error('Failed to load overview data:', error)
-        if (active) {
-          setLoading(false)
-        }
-      }
-    }
-
-    loadData()
-
-    return () => {
-      active = false
-    }
-  }, [])
-
-  // Create & clean up Chart.js instances
-  useEffect(() => {
-    if (loading) return
-
-    let timelineChartInstance = null
-    let attackTypesChartInstance = null
-
-    // Timeline Chart
-    if (threatActivityEnabled && timelineCanvasRef.current) {
-      const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-      const data = [12, 19, 8, 15, 22, 18, 25]
-
-      timelineChartInstance = new Chart(timelineCanvasRef.current, {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [
-            {
-              label: 'Security Events',
-              data,
-              borderColor: 'rgb(139, 92, 246)',
-              backgroundColor: 'rgba(139, 92, 246, 0.1)',
-              fill: true,
-              tension: 0.4,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              display: false,
-            },
-          },
-          scales: {
-            y: {
-              beginAtZero: true,
-            },
-          },
-        },
-      })
-    }
-
-    // Attack Types Chart
-    if (attackTypesEnabled && attackTypesCanvasRef.current) {
-      const data = [30, 25, 20, 15, 10]
-      const labels = ['Malware', 'Phishing', 'DDoS', 'Intrusion', 'Other']
-
-      attackTypesChartInstance = new Chart(attackTypesCanvasRef.current, {
-        type: 'doughnut',
-        data: {
-          labels,
-          datasets: [
-            {
-              data,
-              backgroundColor: [
-                '#8b5cf6',
-                '#10b981',
-                '#f59e0b',
-                '#ef4444',
-                '#6b7280',
-              ],
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'bottom',
-            },
-          },
-        },
-      })
-    }
-
-    return () => {
-      if (timelineChartInstance) timelineChartInstance.destroy()
-      if (attackTypesChartInstance) attackTypesChartInstance.destroy()
-    }
-  }, [loading, threatActivityEnabled, attackTypesEnabled])
-
-  return (
-    <div className="overview-page">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title" data-testid="overview-title">{pageTitle}</h1>
-          <p className="page-subtitle">{pageDescription}</p>
-        </div>
-        <SecurityScanner />
-      </div>
-
-      {loading ? (
-        <div className="loading-container" data-testid="loading-overview">
-          <div className="loading-spinner-large"></div>
-          <p>Loading security data...</p>
-        </div>
-      ) : (
-        <div className="overview-content">
-          {/* Stats Grid */}
-          <section className="stats-section" data-testid="stats-section">
-            <div className="stats-grid">
-              <Widget
-                title={stats[0]?.label || 'Total Events'}
-                value={overview.totalEvents || 0}
-                icon={ShieldCheckIcon}
-                color="blue"
-                data-testid="total-events-card"
-              />
-
-              <Widget
-                title={stats[1]?.label || 'Events (24h)'}
-                subtitle="Last 24 hours"
-                value={overview.events24h || 0}
-                icon={ClockIcon}
-                color="green"
-                trend={overview.trends?.percentage || 0}
-                data-testid="events-24h-card"
-              />
-
-              <Widget
-                title={stats[2]?.label || 'Blocked Attacks'}
-                value={overview.blockedAttacks || 0}
-                icon={ExclamationTriangleIcon}
-                color="red"
-                data-testid="blocked-attacks-card"
-              />
-
-              <Widget
-                title={stats[3]?.label || 'System Uptime'}
-                value={overview.systemUptime || 0}
-                icon={HeartIcon}
-                color="purple"
-                format="percentage"
-                data-testid="system-uptime-card"
-              />
-            </div>
-          </section>
-
-          {/* Charts Section */}
-          {showCharts && (
-            <section className="charts-section">
-              <div className="charts-grid">
-                {/* Threat Timeline Chart */}
-                {threatActivityEnabled && (
-                  <Card
-                    title={threatActivityTitle}
-                    icon={ShieldCheckIcon}
-                    data-testid="threat-timeline-chart"
-                  >
-                    <div className="chart-container">
-                      <canvas ref={timelineCanvasRef}></canvas>
-                    </div>
-                  </Card>
-                )}
-
-                {/* Attack Types Distribution */}
-                {attackTypesEnabled && (
-                  <Card
-                    title={attackTypesTitle}
-                    icon={ChartBarIcon}
-                    data-testid="attack-types-chart"
-                  >
-                    <div className="chart-container">
-                      <canvas ref={attackTypesCanvasRef}></canvas>
-                    </div>
-                  </Card>
-                )}
-              </div>
-            </section>
-          )}
-
-          {/* Recent Events */}
-          <section className="recent-events-section" data-testid="recent-events">
-            <div className="section-header">
-              <h2 className="section-title">Recent Security Events</h2>
-              <Link to="/dashboard/activity-logs" className="view-all-link">
-                View All Logs →
-              </Link>
-            </div>
-
-            <div className="events-list glass">
-              {recentEvents.map(event => (
-                <div
-                  key={event.id}
-                  className="event-item"
-                  data-testid={`event-${event.id}`}
-                >
-                  <div className={`event-icon severity-${event.severity}`}>
-                    {getEventIcon(event.eventType)}
-                  </div>
-                  <div className="event-content">
-                    <p className="event-description">{event.description}</p>
-                    <p className="event-meta">
-                      {event.eventType} • {event.source?.ip || 'Unknown'} •{' '}
-                      {formatDate(event.createdAt)}
-                    </p>
-                  </div>
-                  <div className="event-status">
-                    <span className={`status-badge status-${event.status}`}>
-                      {event.status}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
-      )}
+  if (loading || error) return <ResourceState loading={loading} error={error} onRetry={reload} noun="security overview" />
+  const latest = data.latest_security_run
+  return <div className="overview-page">
+    <div className="page-header"><div><h1 className="page-title" data-testid="overview-title">Overview</h1><p className="page-subtitle">Live organization-scoped security posture and recent lifecycle activity.</p></div><Link to="/dashboard/security-runs" className="btn-primary">Security Runs</Link></div>
+    <div className="overview-content">
+      <section className="stats-section" aria-label="Workspace summary"><div className="stats-grid">
+        <Widget title="Security Score" value="—" subtitle="Scoring model unavailable" icon={ShieldCheckIcon} />
+        <Widget title="Open Findings" value={data.open_findings} subtitle="Unresolved findings" icon={ChartBarIcon} />
+        <Widget title="Critical Findings" value={data.critical_findings} subtitle="Critical and unresolved" icon={ExclamationTriangleIcon} />
+        <Widget title="Latest Security Run" value={latest ? displayDate(latest.started_at) : '—'} subtitle={latest ? RUN_STATUS_LABELS[latest.status] : 'No security runs'} icon={ClockIcon} />
+      </div></section>
+      <section className="charts-section"><div className="charts-grid">
+        <Card title="Assessment Coverage" icon={ShieldCheckIcon}><div className="empty-state"><h3>Unavailable</h3><p>HavoSec does not yet calculate a legitimate security score or historical coverage trend.</p></div></Card>
+        <Card title="Severity Distribution" icon={ChartBarIcon}>{data.open_findings ? <div className="chart-container"><canvas ref={severityCanvasRef} role="img" aria-label={severity.map(item => `${item.name}: ${item.count}`).join('; ')} /></div> : <p>No open findings recorded. This does not establish that the workspace is secure.</p>}</Card>
+      </div></section>
+      <section className="recent-events-section"><div className="section-header"><h2 className="section-title">Recent Findings</h2><Link to="/dashboard/findings" className="view-all-link">View Findings →</Link></div><div className="events-list glass">{data.recent_findings.map(finding => <div key={finding.id} className="event-item"><div className={`event-icon severity-${finding.severity}`}><ShieldCheckIcon className="icon-xs" /></div><div className="event-content"><p className="event-description">{finding.title}</p><p className="event-meta">{finding.location || 'Location unavailable'} · {displayDate(finding.last_detected_at)}</p></div><span className={`severity-badge ${finding.severity}`}>{finding.severity}</span><span className="status-badge">{FINDING_STATUS_LABELS[finding.status] || finding.status}</span></div>)}{!data.recent_findings.length && <p>No findings recorded.</p>}</div></section>
+      <section className="recent-events-section"><div className="section-header"><h2 className="section-title">Recent Security Runs</h2><Link to="/dashboard/security-runs" className="view-all-link">View Runs →</Link></div><div className="events-list glass">{data.recent_runs.map(run => <div key={run.id} className="event-item"><div className="event-icon"><ClockIcon className="icon-xs" /></div><div className="event-content"><Link to={`/dashboard/security-runs/${run.id}`} className="event-description">{run.type}</Link><p className="event-meta">{displayDate(run.started_at || run.created_at)}</p></div><span className="status-badge">{RUN_STATUS_LABELS[run.status] || run.status}</span></div>)}{!data.recent_runs.length && <p>No security runs recorded.</p>}</div></section>
+      <Card title="Remediation"><p>{data.counts.remediations} remediation records.</p><Link to="/dashboard/remediation">Review Remediation →</Link></Card>
+      <section className="recent-events-section"><div className="section-header"><h2 className="section-title">Recent Activity</h2><Link to="/dashboard/activity" className="view-all-link">View Activity →</Link></div><div className="events-list glass">{data.recent_activity.map(event => <div key={event.id} className="event-item"><div className="event-icon"><ChartBarIcon className="icon-xs" /></div><div className="event-content"><p className="event-description">{event.message}</p><p className="event-meta">{ACTIVITY_TYPES[event.event_type] || event.event_type} · {displayDate(event.created_at)}</p></div></div>)}{!data.recent_activity.length && <p>No activity recorded.</p>}</div></section>
     </div>
-  )
+  </div>
 }
 
 export default Overview

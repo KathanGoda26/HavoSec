@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from utils.auth import require_roles
+from utils.roles import UserRole
 from fastapi.responses import FileResponse
 from datetime import datetime
 import os
@@ -23,7 +25,7 @@ def generate_unique_filename(original_filename: str) -> str:
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     return f"{timestamp}_{unique_id}{ext}"
 
-@router.post("/")
+@router.post("/", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def upload_image(file: UploadFile = File(...)):
     """Upload an image file"""
     
@@ -60,7 +62,7 @@ async def upload_image(file: UploadFile = File(...)):
         "type": file.content_type
     }
 
-@router.post("/multiple")
+@router.post("/multiple", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def upload_multiple_images(files: list[UploadFile] = File(...)):
     """Upload multiple image files"""
     
@@ -114,7 +116,7 @@ async def get_image(filename: str):
     
     return FileResponse(file_path)
 
-@router.delete("/images/{filename}")
+@router.delete("/images/{filename}", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def delete_image(filename: str):
     """Delete an uploaded image"""
     
@@ -127,7 +129,7 @@ async def delete_image(filename: str):
     
     return {"success": True, "message": "Image deleted successfully"}
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def list_images():
     """List all uploaded images"""
     

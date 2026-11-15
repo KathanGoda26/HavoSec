@@ -1,19 +1,25 @@
 from datetime import datetime, timedelta
 import bcrypt
+import os
 
 async def seed_database(db):
     """Seed database with initial data"""
     
+    # Demo credentials are opt-in and must never appear automatically in a
+    # deployed database.
+    seed_demo_accounts = os.environ.get("SEED_DEMO_ACCOUNTS", "").lower() == "true"
+
     # Seed admin user
-    admin_exists = await db.admin_users.find_one({"email": "admin@havosec.com"})
-    if not admin_exists:
+    admin_exists = await db.users.find_one({"email": "admin@havosec.com"})
+    if seed_demo_accounts and not admin_exists:
         hashed_password = bcrypt.hashpw("admin123".encode(), bcrypt.gensalt()).decode()
-        await db.admin_users.insert_one({
+        await db.users.insert_one({
             "email": "admin@havosec.com",
             "password": hashed_password,
             "firstName": "Admin",
             "lastName": "User",
             "role": "admin",
+            "status": "active",
             "permissions": ["all"],
             "createdAt": datetime.utcnow()
         })
@@ -21,7 +27,7 @@ async def seed_database(db):
     
     # Seed client user
     client_exists = await db.users.find_one({"email": "client@havosec.com"})
-    if not client_exists:
+    if seed_demo_accounts and not client_exists:
         hashed_password = bcrypt.hashpw("client123".encode(), bcrypt.gensalt()).decode()
         await db.users.insert_one({
             "email": "client@havosec.com",
@@ -29,7 +35,8 @@ async def seed_database(db):
             "firstName": "Client",
             "lastName": "User",
             "company": "HavoSec",
-            "role": "viewer",
+            "role": "user",
+            "status": "active",
             "isActive": True,
             "emailVerified": True,
             "createdAt": datetime.utcnow()

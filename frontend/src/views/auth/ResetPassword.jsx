@@ -1,11 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import axios from 'axios'
+import apiClient from '@/services/apiClient'
 import DynamicSEO from '@/components/DynamicSEO'
-
-const API_BASE = (
-  import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
-).replace(/\/$/, '')
 
 function ResetPassword() {
   const location = useLocation()
@@ -32,7 +28,7 @@ function ResetPassword() {
     // Verify token is valid
     async function verifyToken() {
       try {
-        await axios.post(`${API_BASE}/auth/verify-reset-token`, {
+        await apiClient.post('/auth/verify-reset-token', {
           token: tokenVal,
         })
       } catch (err) {
@@ -60,7 +56,7 @@ function ResetPassword() {
     setIsLoading(true)
 
     try {
-      await axios.post(`${API_BASE}/auth/reset-password`, {
+      await apiClient.post('/auth/reset-password', {
         token,
         newPassword: password,
       })

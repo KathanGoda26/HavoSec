@@ -1,11 +1,11 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Request
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, HTTPException, Request, Query
 from datetime import datetime
 from typing import Dict, List
 from bson import ObjectId
 import json
 import asyncio
-from jose import jwt
-import os
+from utils.auth import decode_access_token, find_account, get_current_user, require_roles
+from utils.roles import UserRole
 
 router = APIRouter()
 
@@ -42,7 +42,16 @@ manager = ConnectionManager()
 
 # WebSocket endpoint for real-time notifications
 @router.websocket("/ws/{user_id}")
-async def websocket_endpoint(websocket: WebSocket, user_id: str):
+async def websocket_endpoint(websocket: WebSocket, user_id: str, token: str = Query(...)):
+    try:
+        payload = decode_access_token(token)
+        account, _ = await find_account(websocket.app.state.db, payload["sub"], payload.get("source"))
+        if not account or str(account["_id"]) != user_id:
+            await websocket.close(code=1008, reason="Unauthorized")
+            return
+    except HTTPException:
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
     await manager.connect(websocket, user_id)
     try:
         while True:
@@ -56,25 +65,11 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
 # REST endpoints for notifications
 
 @router.get("/")
-async def get_notifications(request: Request, limit: int = 50, unread_only: bool = False):
+async def get_notifications(request: Request, limit: int = 50, unread_only: bool = False, user=Depends(get_current_user)):
     """Get user notifications"""
     db = request.app.state.db
     
-    # Get user from auth header
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.replace("Bearer ", "")
-    
-    # Decode token to get user_id
-    # import jwt (removed)
-    # import os (removed)
-    try:
-        payload = jwt.decode(token, os.environ.get("JWT_SECRET", "havosec-super-secret-jwt-key-2025"), algorithms=["HS256"])
-        user_id = payload.get("userId")
-    except:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    user_id = user["id"]
     
     query = {"userId": user_id}
     if unread_only:
@@ -97,7 +92,7 @@ async def get_notifications(request: Request, limit: int = 50, unread_only: bool
         "total": len(notifications)
     }
 
-@router.post("/")
+@router.post("/", dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
 async def create_notification(request: Request):
     """Create a new notification (admin/system use)"""
     db = request.app.state.db
@@ -131,12 +126,12 @@ async def create_notification(request: Request):
     return {"success": True, "notification": notification}
 
 @router.put("/{notification_id}/read")
-async def mark_as_read(notification_id: str, request: Request):
+async def mark_as_read(notification_id: str, request: Request, user=Depends(get_current_user)):
     """Mark notification as read"""
     db = request.app.state.db
     
     result = await db.notifications.update_one(
-        {"_id": ObjectId(notification_id)},
+        {"_id": ObjectId(notification_id), "userId": user["id"]},
         {"$set": {"read": True, "readAt": datetime.utcnow()}}
     )
     
@@ -146,23 +141,11 @@ async def mark_as_read(notification_id: str, request: Request):
     return {"success": True, "message": "Marked as read"}
 
 @router.put("/mark-all-read")
-async def mark_all_as_read(request: Request):
+async def mark_all_as_read(request: Request, user=Depends(get_current_user)):
     """Mark all notifications as read for a user"""
     db = request.app.state.db
     
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.replace("Bearer ", "")
-    
-    # import jwt (removed)
-    # import os (removed)
-    try:
-        payload = jwt.decode(token, os.environ.get("JWT_SECRET", "havosec-super-secret-jwt-key-2025"), algorithms=["HS256"])
-        user_id = payload.get("userId")
-    except:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    user_id = user["id"]
     
     result = await db.notifications.update_many(
         {"userId": user_id, "read": False},
@@ -172,11 +155,11 @@ async def mark_all_as_read(request: Request):
     return {"success": True, "markedRead": result.modified_count}
 
 @router.delete("/{notification_id}")
-async def delete_notification(notification_id: str, request: Request):
+async def delete_notification(notification_id: str, request: Request, user=Depends(get_current_user)):
     """Delete a notification"""
     db = request.app.state.db
     
-    result = await db.notifications.delete_one({"_id": ObjectId(notification_id)})
+    result = await db.notifications.delete_one({"_id": ObjectId(notification_id), "userId": user["id"]})
     
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Notification not found")
@@ -184,23 +167,11 @@ async def delete_notification(notification_id: str, request: Request):
     return {"success": True, "message": "Notification deleted"}
 
 @router.delete("/")
-async def clear_all_notifications(request: Request):
+async def clear_all_notifications(request: Request, user=Depends(get_current_user)):
     """Clear all notifications for a user"""
     db = request.app.state.db
     
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.replace("Bearer ", "")
-    
-    # import jwt (removed)
-    # import os (removed)
-    try:
-        payload = jwt.decode(token, os.environ.get("JWT_SECRET", "havosec-super-secret-jwt-key-2025"), algorithms=["HS256"])
-        user_id = payload.get("userId")
-    except:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    user_id = user["id"]
     
     result = await db.notifications.delete_many({"userId": user_id})
     

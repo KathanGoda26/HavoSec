@@ -1,49 +1,30 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime, timedelta
-# import jwt
-from jose import jwt, ExpiredSignatureError, JWTError
-import os
-from bson import ObjectId
 
-router = APIRouter()
+from utils.auth import get_current_user, organization_scope, require_roles
+from utils.roles import UserRole
 
-JWT_SECRET = os.environ.get("JWT_SECRET", "havosec-super-secret-jwt-key-2025")
-
-def verify_token(token: str):
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        return payload
-    except ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-def get_user_from_request(request: Request):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Access denied. No token provided.")
-    token = auth_header.replace("Bearer ", "")
-    return verify_token(token)
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 @router.get("/overview")
-async def get_overview(request: Request):
-    payload = get_user_from_request(request)
+async def get_overview(request: Request, user=Depends(get_current_user)):
     db = request.app.state.db
+    tenant = organization_scope(user)
     
     now = datetime.utcnow()
     last_24h = now - timedelta(hours=24)
     last_7d = now - timedelta(days=7)
     
-    total_events = await db.security_events.count_documents({})
-    events_24h = await db.security_events.count_documents({"createdAt": {"$gte": last_24h}})
-    events_7d = await db.security_events.count_documents({"createdAt": {"$gte": last_7d}})
-    critical_events = await db.security_events.count_documents({"severity": "critical", "createdAt": {"$gte": last_7d}})
-    blocked_attacks = await db.security_events.count_documents({"status": "blocked", "createdAt": {"$gte": last_24h}})
+    total_events = await db.security_events.count_documents(tenant)
+    events_24h = await db.security_events.count_documents({**tenant, "createdAt": {"$gte": last_24h}})
+    events_7d = await db.security_events.count_documents({**tenant, "createdAt": {"$gte": last_7d}})
+    critical_events = await db.security_events.count_documents({**tenant, "severity": "critical", "createdAt": {"$gte": last_7d}})
+    blocked_attacks = await db.security_events.count_documents({**tenant, "status": "blocked", "createdAt": {"$gte": last_24h}})
     
     # Calculate trends
     prev_week_start = last_7d - timedelta(days=7)
     prev_week_events = await db.security_events.count_documents({
-        "createdAt": {"$gte": prev_week_start, "$lt": last_7d}
+        **tenant, "createdAt": {"$gte": prev_week_start, "$lt": last_7d}
     })
     
     trends_direction = "increase" if events_7d > prev_week_events else "decrease"
@@ -66,9 +47,9 @@ async def get_overview(request: Request):
     }
 
 @router.get("/attack-insights")
-async def get_attack_insights(request: Request, period: str = "7d"):
-    payload = get_user_from_request(request)
+async def get_attack_insights(request: Request, period: str = "7d", user=Depends(get_current_user)):
     db = request.app.state.db
+    tenant = organization_scope(user)
     
     if period == "24h":
         start_date = datetime.utcnow() - timedelta(hours=24)
@@ -79,21 +60,21 @@ async def get_attack_insights(request: Request, period: str = "7d"):
     
     # Aggregate by event type
     events_by_type = await db.security_events.aggregate([
-        {"$match": {"createdAt": {"$gte": start_date}}},
+        {"$match": {**tenant, "createdAt": {"$gte": start_date}}},
         {"$group": {"_id": "$eventType", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}}
     ]).to_list(length=100)
     
     # Aggregate by severity
     events_by_severity = await db.security_events.aggregate([
-        {"$match": {"createdAt": {"$gte": start_date}}},
+        {"$match": {**tenant, "createdAt": {"$gte": start_date}}},
         {"$group": {"_id": "$severity", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}}
     ]).to_list(length=100)
     
     # Top source IPs
     top_source_ips = await db.security_events.aggregate([
-        {"$match": {"createdAt": {"$gte": start_date}, "source.ip": {"$exists": True}}},
+        {"$match": {**tenant, "createdAt": {"$gte": start_date}, "source.ip": {"$exists": True}}},
         {"$group": {"_id": "$source.ip", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
         {"$limit": 10}
@@ -109,16 +90,16 @@ async def get_attack_insights(request: Request, period: str = "7d"):
     }
 
 @router.get("/defense-metrics")
-async def get_defense_metrics(request: Request):
-    payload = get_user_from_request(request)
+async def get_defense_metrics(request: Request, user=Depends(get_current_user)):
     db = request.app.state.db
+    tenant = organization_scope(user)
     
     last_7d = datetime.utcnow() - timedelta(days=7)
     
-    total_blocked = await db.security_events.count_documents({"status": "blocked", "createdAt": {"$gte": last_7d}})
-    total_detected = await db.security_events.count_documents({"createdAt": {"$gte": last_7d}})
+    total_blocked = await db.security_events.count_documents({**tenant, "status": "blocked", "createdAt": {"$gte": last_7d}})
+    total_detected = await db.security_events.count_documents({**tenant, "createdAt": {"$gte": last_7d}})
     mitigation_rate = await db.security_events.count_documents({
-        "status": {"$in": ["blocked", "resolved"]},
+        **tenant, "status": {"$in": ["blocked", "resolved"]},
         "createdAt": {"$gte": last_7d}
     })
     
@@ -137,11 +118,10 @@ async def get_defense_metrics(request: Request):
     }
 
 @router.get("/activity-logs")
-async def get_activity_logs(request: Request, page: int = 1, limit: int = 50, eventType: str = None, severity: str = None):
-    payload = get_user_from_request(request)
+async def get_activity_logs(request: Request, page: int = 1, limit: int = 50, eventType: str = None, severity: str = None, user=Depends(get_current_user)):
     db = request.app.state.db
     
-    query = {}
+    query = organization_scope(user)
     if eventType:
         query["eventType"] = eventType
     if severity:
@@ -169,8 +149,7 @@ async def get_activity_logs(request: Request, page: int = 1, limit: int = 50, ev
     }
 
 @router.get("/system-health")
-async def get_system_health(request: Request):
-    payload = get_user_from_request(request)
+async def get_system_health(request: Request, user=Depends(require_roles(UserRole.SUPERADMIN))):
     
     # Mock system health data
     return {

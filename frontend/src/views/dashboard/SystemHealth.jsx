@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react'
-import { useContentStore } from '@/stores/contentStore'
+import React, { useState, useEffect, useRef } from 'react'
 
 const logPool = [
   { severity: 'INFO', message: 'Polled CPU and memory thresholds: all systems stable' },
@@ -18,10 +17,9 @@ function getStrokeDashoffset(percentage) {
 }
 
 function SystemHealth() {
-  const contentStore = useContentStore()
   const terminalBodyRef = useRef(null)
 
-  // Live updating usage states
+  // Simulated usage states; no live platform telemetry is connected.
   const [cpuUsage, setCpuUsage] = useState(42)
   const [ramUsage, setRamUsage] = useState(61)
   const [diskUsage, setDiskUsage] = useState(74)
@@ -47,27 +45,11 @@ function SystemHealth() {
   ])
 
   // Page titles and description
-  const pageTitle = useMemo(() => {
-    return contentStore.clientDashboard?.systemHealth?.title || 'System Health'
-  }, [contentStore.clientDashboard?.systemHealth?.title])
-
-  const pageDescription = useMemo(() => {
-    return contentStore.clientDashboard?.systemHealth?.description || 'Monitor system performance and health metrics'
-  }, [contentStore.clientDashboard?.systemHealth?.description])
+  const pageTitle = 'Platform Health'
+  const pageDescription = 'Demo platform metrics and simulated logs — not live infrastructure telemetry.'
 
   // Load content and start intervals
   useEffect(() => {
-    async function loadContent() {
-      try {
-        if (contentStore.fetchClientDashboard) {
-          await contentStore.fetchClientDashboard()
-        }
-      } catch (error) {
-        console.warn('Could not load client dashboard content, using defaults:', error)
-      }
-    }
-    loadContent()
-
     // Metrics interval
     const metricsInterval = setInterval(() => {
       setCpuUsage(prev => Math.min(Math.max(prev + Math.floor(Math.random() * 9) - 4, 10), 95))

@@ -1,92 +1,50 @@
-from fastapi import APIRouter, HTTPException, Request
-from datetime import datetime
-from bson import ObjectId
+"""Legacy client URLs backed by the organization service; platform-only management."""
+from fastapi import APIRouter, Depends, Query
+from core.database import get_database
+from models.organizations import OrganizationCreate, OrganizationUpdate
+from repositories.organizations import OrganizationRepository
+from services.organizations import OrganizationService, database_operation
+from utils.auth import require_roles
+from utils.roles import UserRole
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_roles(UserRole.SUPERADMIN))])
+
+
+def organization_service(db=Depends(get_database)):
+    return OrganizationService(OrganizationRepository(db))
+
 
 async def get_client_stats(db):
     total = await db.client_companies.count_documents({})
-    active = await db.client_companies.count_documents({"isActive": True})
+    active = await db.client_companies.count_documents({
+        "isActive": {"$ne": False},
+        "$or": [{"status": "active"}, {"status": {"$exists": False}}],
+    })
     return {"total": total, "active": active}
 
+
 @router.get("/")
-async def get_clients(request: Request, limit: int = 50, offset: int = 0):
-    db = request.app.state.db
-    
-    cursor = db.client_companies.find({}).sort("createdAt", -1).skip(offset).limit(limit)
-    clients = await cursor.to_list(length=limit)
-    total = await db.client_companies.count_documents({})
-    
-    for client in clients:
-        client["id"] = str(client.pop("_id"))
-    
-    return {"clients": clients, "total": total}
+async def get_clients(limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0, le=100000),
+                      service=Depends(organization_service)):
+    return await database_operation(service.list(limit, offset))
+
 
 @router.get("/{client_id}")
-async def get_client(client_id: str, request: Request):
-    db = request.app.state.db
-    
-    client = await db.client_companies.find_one({"_id": ObjectId(client_id)})
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-    
-    client["id"] = str(client.pop("_id"))
-    return client
+async def get_client(client_id: str, service=Depends(organization_service)):
+    return await database_operation(service.get(client_id))
+
 
 @router.post("/")
-async def create_client(request: Request):
-    db = request.app.state.db
-    data = await request.json()
-    
-    client_doc = {
-        "name": data.get("name"),
-        "email": data.get("email"),
-        "phone": data.get("phone"),
-        "website": data.get("website"),
-        "industry": data.get("industry"),
-        "size": data.get("size"),
-        "subscription": data.get("subscription", {"plan": "free", "status": "trial"}),
-        "services": data.get("services", []),
-        "securityModels": data.get("securityModels", {"offensive": False, "defensive": False}),
-        "isActive": data.get("isActive", True),
-        "createdAt": datetime.utcnow()
-    }
-    
-    result = await db.client_companies.insert_one(client_doc)
-    client_doc["id"] = str(result.inserted_id)
-    del client_doc["_id"]
-    
-    return {"message": "Client created", "client": client_doc}
+async def create_client(payload: OrganizationCreate, service=Depends(organization_service)):
+    return await database_operation(service.create(payload))
+
 
 @router.put("/{client_id}")
-async def update_client(client_id: str, request: Request):
-    db = request.app.state.db
-    data = await request.json()
-    
-    update_data = {k: v for k, v in data.items() if k not in ["_id", "id"]}
-    update_data["updatedAt"] = datetime.utcnow()
-    
-    result = await db.client_companies.update_one(
-        {"_id": ObjectId(client_id)},
-        {"$set": update_data}
-    )
-    
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Client not found")
-    
-    # Fetch and return the updated client
-    updated_client = await db.client_companies.find_one({"_id": ObjectId(client_id)})
-    updated_client["id"] = str(updated_client.pop("_id"))
-    
-    return {"message": "Client updated", "client": updated_client}
+@router.patch("/{client_id}")
+async def update_client(client_id: str, payload: OrganizationUpdate, service=Depends(organization_service)):
+    return await database_operation(service.update(client_id, payload))
+
 
 @router.delete("/{client_id}")
-async def delete_client(client_id: str, request: Request):
-    db = request.app.state.db
-    
-    result = await db.client_companies.delete_one({"_id": ObjectId(client_id)})
-    
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Client not found")
-    
-    return {"message": "Client deleted"}
+async def delete_client(client_id: str, service=Depends(organization_service)):
+    return await database_operation(service.deactivate(client_id))

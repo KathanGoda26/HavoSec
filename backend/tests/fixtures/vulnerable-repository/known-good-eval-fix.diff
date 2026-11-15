@@ -1,0 +1,14 @@
+--- a/app.py
++++ b/app.py
+@@ -1,8 +1,10 @@
++import ast
+ import subprocess
+ 
+ 
+ def unsafe(user_input):
+-    return eval(user_input)
++    # Deterministic fixture fix: parse data without executing Python code.
++    return ast.literal_eval(user_input)
+ 
+ 
+ def also_unsafe(user_input):

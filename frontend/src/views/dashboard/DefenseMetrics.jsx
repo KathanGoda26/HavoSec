@@ -1,317 +1,120 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import ResourceState from '@/components/ui/ResourceState'
+import usePollingResource from '@/hooks/usePollingResource'
+import { securityApi, displayDate, isActiveVerification } from '@/services/securityApi'
+import { summarizeRemediations, REMEDIATION_STATUS_LABELS, VERIFICATION_STATUS_LABELS, diffLineType } from '@/dashboard/remediation/status'
+import { useAuthStore } from '@/stores/authStore'
+import { USER_ROLES } from '@/constants/auth'
+import { getApiError } from '@/services/apiClient'
+import PullRequestPanel from '@/dashboard/remediation/PullRequestPanel'
+
+const summaryCards = [
+  ['pending', 'Pending', 'Proposals to review', 'threats'],
+  ['in_progress', 'In Progress', 'Under preparation', 'hardening'],
+  ['awaiting_approval', 'Awaiting Approval', 'Human review required', 'patches'],
+  ['approved', 'Approved', 'Accepted proposals', 'compliance'],
+]
+
+function ShieldIcon() {
+  return <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" /></svg>
+}
+
+function DiffView({ patch }) {
+  if (!patch) return <p>No generated patch is available yet.</p>
+  return <pre className="remediation-diff" aria-label="Proposed unified diff"><code>{patch.split('\n').map((line, index) =>
+    <span className={`diff-line ${diffLineType(line)}`} key={`${index}-${line}`}>{line || ' '}{'\n'}</span>)}</code></pre>
+}
+
+function Metric({ label, value }) {
+  return <div className="verification-metric"><span>{label}</span><strong>{value ?? '—'}</strong></div>
+}
 
 function DefenseMetrics() {
-  // Mock data
-  const [threatsDetected] = useState(12)
-  const [hardeningItems] = useState(8)
-  const [patchesApplied] = useState(15)
-  const [complianceScore] = useState(87)
+  const { projectId } = useParams()
+  const role = useAuthStore(state => state.user?.role)
+  const canManage = role === USER_ROLES.ADMIN || role === USER_ROLES.SUPERADMIN
+  const [expandedId, setExpandedId] = useState(null)
+  const [mutation, setMutation] = useState({ id: null, action: null, error: '' })
+  const { data, loading, error, reload } = usePollingResource(async () => {
+    const params = { limit: 100, ...(projectId ? { project_id: projectId } : {}) }
+    const [remediations, findings] = await Promise.all([
+      securityApi.listRemediations(params),
+      securityApi.listFindings(params),
+    ])
+    return { remediations: remediations.items, findings: new Map(findings.items.map(finding => [finding.id, finding])) }
+  }, [projectId], { shouldPoll: value => value.remediations.some(isActiveVerification) })
+  const remediations = data?.remediations || []
+  const counts = summarizeRemediations(remediations)
 
-  const [threats] = useState([
-    {
-      id: 1,
-      title: 'Suspicious Login Attempt',
-      description: 'Multiple failed login attempts from IP 192.168.1.100',
-      severity: 'high',
-      source: '192.168.1.100',
-      action: 'Blocked',
-      timestamp: '2 minutes ago',
-    },
-    {
-      id: 2,
-      title: 'Port Scan Detected',
-      description: 'Systematic port scanning activity detected',
-      severity: 'medium',
-      source: '10.0.0.15',
-      action: 'Monitored',
-      timestamp: '15 minutes ago',
-    },
-    {
-      id: 3,
-      title: 'Malware Signature Match',
-      description: 'Known malware signature detected in uploaded file',
-      severity: 'critical',
-      source: 'File Upload',
-      action: 'Quarantined',
-      timestamp: '1 hour ago',
-    },
-  ])
+  const act = async (item, action) => {
+    setMutation({ id: item.id, action, error: '' })
+    try {
+      if (action === 'verify') await securityApi.verifyRemediation(item.id)
+      else await securityApi.updateRemediation(item.id, { status: action })
+      reload()
+    } catch (requestError) {
+      setMutation({ id: item.id, action: null, error: getApiError(requestError, 'The remediation action could not be completed.') })
+      return
+    }
+    setMutation({ id: null, action: null, error: '' })
+  }
 
-  const [hardeningRecommendations] = useState([
-    {
-      id: 1,
-      title: 'Enable Multi-Factor Authentication',
-      description: 'Implement MFA for all user accounts to enhance security',
-      priority: 'high',
-    },
-    {
-      id: 2,
-      title: 'Update SSL/TLS Configuration',
-      description: 'Disable weak ciphers and enable TLS 1.3',
-      priority: 'high',
-    },
-    {
-      id: 3,
-      title: 'Implement Rate Limiting',
-      description: 'Add rate limiting to API endpoints to prevent abuse',
-      priority: 'medium',
-    },
-    {
-      id: 4,
-      title: 'Enable Security Headers',
-      description: 'Add CSP, HSTS, and X-Frame-Options headers',
-      priority: 'medium',
-    },
-  ])
-
-  const [patches] = useState([
-    {
-      id: 'PATCH-001',
-      title: 'Security Update 2024-01',
-      description: 'Critical security patches for authentication and SQL injection vulnerabilities',
-      status: 'applied',
-      vulnerabilitiesFixed: 2,
-      appliedAt: '2 days ago',
-      successRate: 100,
-    },
-    {
-      id: 'PATCH-002',
-      title: 'XSS Protection Update',
-      description: 'Implements input sanitization and output encoding',
-      status: 'pending',
-      vulnerabilitiesFixed: 1,
-      appliedAt: null,
-      successRate: 0,
-    },
-    {
-      id: 'PATCH-003',
-      title: 'Dependency Security Update',
-      description: 'Updates vulnerable npm packages to latest secure versions',
-      status: 'applied',
-      vulnerabilitiesFixed: 5,
-      appliedAt: '1 week ago',
-      successRate: 100,
-    },
-  ])
-
-  const hasDefenseData = useMemo(() => true, [])
-
-  return (
-    <div className="defense-metrics-page">
-      <h1 className="page-title">Defense Metrics</h1>
-      <p className="page-subtitle">
-        Defensive security posture - Threat detection, hardening, and compliance
-      </p>
-
-      {/* Defense Results */}
-      {hasDefenseData ? (
-        <div className="defense-content">
-          {/* Defense Summary Cards */}
-          <div className="summary-grid">
-            <div className="summary-card threats">
-              <div className="card-icon">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth="1.5"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
-                  />
-                </svg>
-              </div>
-              <div className="card-content">
-                <h4>Threats Detected</h4>
-                <p className="card-value">{threatsDetected}</p>
-                <span className="card-label">Last 24 hours</span>
-              </div>
+  return <div className="defense-metrics-page">
+    <h1 className="page-title">Remediation</h1>
+    <p className="page-subtitle">Organization-scoped remediation proposals. These records do not modify or deploy changes to source repositories.</p>
+    <ResourceState loading={loading} error={error} onRetry={reload} noun="remediation proposals" />
+    {!loading && !error && (remediations.length ? <div className="defense-content">
+      <div className="summary-grid">{summaryCards.map(([status, title, label, className]) => <div className={`summary-card ${className}`} key={status}><div className="card-icon"><ShieldIcon /></div><div className="card-content"><h4>{title}</h4><p className="card-value">{counts[status]}</p><span className="card-label">{label}</span></div></div>)}</div>
+      <div className="patches-section"><h2>Remediation Proposals</h2><p className="page-subtitle">Review the stored recommendation and proposed fix alongside its source Finding.</p>
+        <div className="patches-list">{remediations.map(item => {
+          const finding = data.findings.get(item.finding_id)
+          const findingsPath = projectId ? `/dashboard/projects/${projectId}/findings` : `/dashboard/findings?project_id=${encodeURIComponent(item.project_id)}`
+          const active = isActiveVerification(item)
+          const verification = item.verification_result
+          const proposal = item.proposal
+          const busy = mutation.id === item.id && mutation.action
+          return <article key={item.id} className="patch-card">
+            <div className="patch-header"><div><h4>{item.summary}</h4><p className="patch-description">{item.recommendation || 'No recommendation has been recorded.'}</p></div><span className="status-badge">{REMEDIATION_STATUS_LABELS[item.status] || item.status}</span></div>
+            <div className="patch-details">
+              <div className="detail-item"><span className="label">Finding:</span><span className="value">{finding?.title || item.finding_id}</span></div>
+              <div className="detail-item"><span className="label">Severity:</span><span className="value">{finding?.severity || 'Unavailable'}</span></div>
+              <div className="detail-item"><span className="label">Validation:</span><span className="value">{item.validation_status || 'Unavailable'}</span></div>
+              <div className="detail-item"><span className="label">Verification:</span><span className={`status-badge ${item.verification_status}`}>{VERIFICATION_STATUS_LABELS[item.verification_status] || item.verification_status}</span></div>
+              <div className="detail-item"><span className="label">Project:</span><span className="value">{item.project_id}</span></div>
+              <div className="detail-item"><span className="label">Source commit:</span><span className="value commit-value">{item.source_commit || 'Unavailable'}</span></div>
+              <div className="detail-item"><span className="label">Created:</span><span className="value">{displayDate(item.created_at)}</span></div>
+              <div className="detail-item"><span className="label">Updated:</span><span className="value">{displayDate(item.updated_at)}</span></div>
             </div>
-
-            <div className="summary-card hardening">
-              <div className="card-icon">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth="1.5"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"
-                  />
-                </svg>
-              </div>
-              <div className="card-content">
-                <h4>Hardening Items</h4>
-                <p className="card-value">{hardeningItems}</p>
-                <span className="card-label">Recommendations</span>
-              </div>
+            <div className="patch-actions">
+              <Link to={findingsPath} className="btn-secondary">View Finding</Link>
+              {canManage && !active && item.verification_status !== 'verified' && <button type="button" className="btn-primary" disabled={Boolean(busy)} onClick={() => act(item, 'verify')}>{busy === 'verify' ? 'Queueing…' : proposal ? 'Verify Fix' : 'Generate & Verify'}</button>}
+              {canManage && item.status === 'awaiting_approval' && item.verification_status === 'verified' && <button type="button" className="btn-primary" disabled={Boolean(busy)} onClick={() => act(item, 'approved')}>{busy === 'approved' ? 'Approving…' : 'Approve'}</button>}
+              {canManage && ['pending', 'awaiting_approval'].includes(item.status) && <button type="button" className="btn-secondary" disabled={Boolean(busy)} onClick={() => act(item, 'rejected')}>{busy === 'rejected' ? 'Rejecting…' : 'Reject'}</button>}
+              <button type="button" className="btn-secondary" aria-expanded={expandedId === item.id} aria-controls={`${item.id}-review`} onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}>{expandedId === item.id ? 'Close Review' : 'Review Details'}</button>
             </div>
-
-            <div className="summary-card patches">
-              <div className="card-icon">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth="1.5"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M11.42 15.17L17.25 21A2.652 2.652 0 0021 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 004.486-6.336l-3.276 3.277a3.004 3.004 0 01-2.25-2.25l3.276-3.276a4.5 4.5 0 00-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437l1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008z"
-                  />
-                </svg>
+            {mutation.id === item.id && mutation.error && <p role="alert" className="form-error remediation-action-error">{mutation.error}</p>}
+            {expandedId === item.id && <section id={`${item.id}-review`} className="patch-section" aria-label={`Review ${item.summary}`}>
+              <div className="review-block"><h4>Original evidence</h4><p>{finding?.description || 'Finding evidence is unavailable.'}</p><p><strong>Location:</strong> {finding?.location || 'Unavailable'} · <strong>Rule:</strong> {finding?.evidence?.rule_id || finding?.category || 'Unavailable'}</p></div>
+              <div className="review-block"><h4>Proposed fix</h4><p>{proposal?.explanation || item.proposed_fix || 'A proposal has not been generated.'}</p><DiffView patch={proposal?.patch} />
+                {proposal && <><p><strong>Expected security effect:</strong> {proposal.expected_security_effect}</p><p><strong>Affected files:</strong> {proposal.affected_files.join(', ')}</p><p><strong>Confidence:</strong> {Math.round(proposal.confidence * 100)}%</p>
+                  <h4>Potential side effects</h4>{proposal.potential_side_effects?.length ? <ul>{proposal.potential_side_effects.map(value => <li key={value}>{value}</li>)}</ul> : <p>None reported by the proposal.</p>}
+                  <h4>Recommended human tests</h4>{proposal.recommended_tests?.length ? <ul>{proposal.recommended_tests.map(value => <li key={value}>{value}</li>)}</ul> : <p>No repository-specific tests were recommended.</p>}</>}
               </div>
-              <div className="card-content">
-                <h4>Patches Applied</h4>
-                <p className="card-value">{patchesApplied}</p>
-                <span className="card-label">This month</span>
-              </div>
-            </div>
-
-            <div className="summary-card compliance">
-              <div className="card-icon">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth="1.5"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z"
-                  />
-                </svg>
-              </div>
-              <div className="card-content">
-                <h4>Compliance Score</h4>
-                <p className="card-value">{complianceScore}%</p>
-                <span className="card-label">CIS Benchmark</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Threat Detection */}
-          <div className="threats-section">
-            <h2>Detected Threats</h2>
-            <div className="threats-list">
-              {threats.map(threat => (
-                <div
-                  key={threat.id}
-                  className={`threat-card ${threat.severity}`}
-                >
-                  <div className="threat-header">
-                    <div>
-                      <h4>{threat.title}</h4>
-                      <p className="threat-time">{threat.timestamp}</p>
-                    </div>
-                    <span className={`severity-badge ${threat.severity}`}>
-                      {threat.severity}
-                    </span>
-                  </div>
-                  <p className="threat-description">{threat.description}</p>
-                  <div className="threat-details">
-                    <span><strong>Source:</strong> {threat.source}</span>
-                    <span><strong>Action:</strong> {threat.action}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Hardening Recommendations */}
-          <div className="hardening-section">
-            <h2>Security Hardening Recommendations</h2>
-            <div className="hardening-list">
-              {hardeningRecommendations.map(item => (
-                <div key={item.id} className="hardening-card">
-                  <div className="hardening-header">
-                    <h4>{item.title}</h4>
-                    <span className={`priority-badge ${item.priority}`}>
-                      {item.priority} Priority
-                    </span>
-                  </div>
-                  <p className="hardening-description">{item.description}</p>
-                  <div className="hardening-actions">
-                    <button className="btn-secondary">View Details</button>
-                    <button className="btn-primary">Apply Fix</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Patches */}
-          <div className="patches-section">
-            <h2>Security Patches</h2>
-            <div className="patches-list">
-              {patches.map(patch => (
-                <div key={patch.id} className="patch-card">
-                  <div className="patch-header">
-                    <div>
-                      <h4>{patch.title}</h4>
-                      <p className="patch-description">{patch.description}</p>
-                    </div>
-                    <span className={`status-badge ${patch.status}`}>{patch.status}</span>
-                  </div>
-
-                  <div className="patch-details">
-                    <div className="detail-item">
-                      <span className="label">Vulnerabilities Fixed:</span>
-                      <span className="value">{patch.vulnerabilitiesFixed}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="label">Applied:</span>
-                      <span className="value">{patch.appliedAt || 'Pending'}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="label">Success Rate:</span>
-                      <span className="value">{patch.successRate}%</span>
-                    </div>
-                  </div>
-
-                  <div className="patch-actions">
-                    <button className="btn-secondary">View Changelog</button>
-                    {patch.status === 'pending' && <button className="btn-primary">Apply Now</button>}
-                    {patch.status === 'applied' && <button className="btn-secondary">Rollback</button>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="empty-state">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth="1.5"
-            stroke="currentColor"
-            className="empty-icon"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"
-            />
-          </svg>
-          <h2>No Defense Data Available</h2>
-          <p>Run a security scan to see defensive metrics</p>
-        </div>
-      )}
-    </div>
-  )
+              <div className="review-block"><h4>Verification result</h4>{verification ? <><p>{verification.summary}</p><div className="verification-grid">
+                <Metric label="Original still present" value={verification.original_finding_present == null ? 'Unknown' : verification.original_finding_present ? 'Yes' : 'No'} />
+                <Metric label="Before findings" value={verification.before_finding_count} /><Metric label="After findings" value={verification.after_finding_count} />
+                <Metric label="New findings" value={verification.new_findings_count} /><Metric label="Equal/higher regressions" value={verification.new_equal_or_higher_findings_count} />
+                <Metric label="Scanner" value={`${verification.scanner} ${verification.scanner_version}`} />
+              </div><p>Verified at {displayDate(verification.verified_at)}</p></> : <p>{active ? 'Verification is running in the isolated worker.' : 'This proposal has not been scanner-verified.'}</p>}</div>
+              <PullRequestPanel remediation={item} canManage={canManage} />
+              <p className="remediation-boundary">A verified result applies only to HavoSec’s isolated copy. No customer repository, branch, deployment, or original Finding is changed automatically.</p>
+            </section>}
+          </article>
+        })}</div>
+      </div>
+    </div> : <div className="empty-state"><div className="empty-icon"><ShieldIcon /></div><h2>No Remediation Proposals</h2><p>No remediation proposals are recorded for this workspace.</p></div>)}
+  </div>
 }
 
 export default DefenseMetrics

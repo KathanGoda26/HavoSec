@@ -1,11 +1,7 @@
 import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
-import axios from 'axios'
+import apiClient from '@/services/apiClient'
 import DynamicSEO from '@/components/DynamicSEO'
-
-const API_BASE = (
-  import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
-).replace(/\/$/, '')
 
 function ForgotPassword() {
   const [email, setEmail] = useState('')
@@ -24,7 +20,7 @@ function ForgotPassword() {
     setError('')
 
     try {
-      await axios.post(`${API_BASE}/auth/forgot-password`, { email })
+      await apiClient.post('/auth/forgot-password', { email })
       setIsSuccess(true)
     } catch (err) {
       // Always show success to prevent email enumeration

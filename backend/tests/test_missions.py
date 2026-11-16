@@ -2,6 +2,7 @@ from test_assets_runs import asset, setup
 from test_projects import Collection, ORG_B, create, request
 
 from routes.missions import router
+from services import missions as mission_services
 
 
 def mission_setup():
@@ -48,3 +49,47 @@ def test_outbox_failure_rolls_back_mission():
     assert not db.mission_outbox.documents
     db.mission_outbox.fail_insert = False
     assert submit(app, payload).status_code == 201
+
+
+def test_fixture_report_is_scoped_and_pins_the_operator_commit(monkeypatch):
+    app, db, identity, payload = mission_setup()
+    scan = {**payload, 'mission_type': 'fixture_repository_assessment'}
+    monkeypatch.delenv('MISSION_FIXTURE_COMMIT', raising=False)
+    assert submit(app, scan).status_code == 503
+    commit = 'a' * 40
+    monkeypatch.setenv('MISSION_FIXTURE_COMMIT', commit)
+    created = submit(app, scan)
+    assert created.status_code == 201, created.text
+    assert db.missions.documents[0]['fixture_commit'] == commit
+    path = f"/api/missions/{created.json()['id']}/report"
+    assert request(app, 'GET', path).status_code == 404
+    db.missions.documents[0]['assessment_report'] = {'commit_sha': commit, 'status': 'complete'}
+    assert request(app, 'GET', path).json()['commit_sha'] == commit
+    identity['organizationId'] = ORG_B
+    assert request(app, 'GET', path).status_code == 404
+
+
+def test_github_mission_pins_commit_and_keeps_it_on_replay(monkeypatch):
+    app, db, _, payload = mission_setup()
+    scan = {**payload, 'mission_type': 'github_repository_assessment'}
+    assert submit(app, scan).status_code == 403
+    db.client_companies.documents[0]['mission_policy'] = {'github_assessment': 'require_approval'}
+    authorized = {'repository': 'example/repo', 'repository_id': 20, 'branch': 'main'}
+    calls = []
+
+    async def scope(*args):
+        return authorized
+
+    async def resolve(github):
+        assert github == authorized
+        calls.append(github)
+        return 'b' * 40
+
+    monkeypatch.setattr(mission_services, 'authorized_github_scope', scope)
+    monkeypatch.setattr(mission_services, 'resolve_github_commit', resolve)
+    created = submit(app, scan)
+    assert created.status_code == 201, created.text
+    assert created.json()['source_commit'] == 'b' * 40
+    assert submit(app, scan).json()['id'] == created.json()['id']
+    assert len(calls) == 1
+    assert len(db.mission_outbox.documents) == 1

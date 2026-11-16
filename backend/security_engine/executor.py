@@ -36,17 +36,23 @@ async def execute(arguments, *, cwd, timeout, max_output_bytes, environment, art
         process = await asyncio.create_subprocess_exec(*arguments, cwd=cwd, stdout=stdout, stderr=stderr,
                                                        env=environment, shell=False)
         loop, started = asyncio.get_running_loop(), asyncio.get_running_loop().time()
-        while process.returncode is None:
-            if loop.time() - started >= timeout:
-                process.kill(); await process.wait()
-                raise ExecutionTimeout('External operation timed out')
-            if stdout_path.stat().st_size + stderr_path.stat().st_size > max_output_bytes:
-                process.kill(); await process.wait()
-                raise OutputLimitExceeded('External operation exceeded its output limit')
-            try:
-                await asyncio.wait_for(process.wait(), timeout=min(.1, timeout))
-            except TimeoutError:
-                pass
+        try:
+            while process.returncode is None:
+                if loop.time() - started >= timeout:
+                    raise ExecutionTimeout('External operation timed out')
+                if stdout_path.stat().st_size + stderr_path.stat().st_size > max_output_bytes:
+                    raise OutputLimitExceeded('External operation exceeded its output limit')
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=min(.1, timeout))
+                except TimeoutError:
+                    pass
+        finally:
+            if process.returncode is None:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                await process.wait()
         if stdout_path.stat().st_size + stderr_path.stat().st_size > max_output_bytes:
             raise OutputLimitExceeded('External operation exceeded its output limit')
     return ProcessResult(process.returncode, stdout_path.read_bytes(), stderr_path.read_bytes())

@@ -3,15 +3,19 @@ import asyncio
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from mission_orchestration.fixture_assessment import assess_fixture
+from mission_orchestration.github_assessment import assess_github_repository
 from mission_orchestration.governance import ATTEMPT_BUSY, FixtureGateway, FixtureRejected
 from mission_orchestration.plan import (
-    ASSESSMENT_V1, FixtureAttempt, MissionRef, ProgressEvent, ProgressState, TaskResult,
+    ASSESSMENT_V1, FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION, INCOMPLETE_SCAN, FixtureAttempt, MissionRef,
+    ProgressEvent, ProgressState, TaskResult,
 )
 
 
 class MissionActivities:
-    def __init__(self, store):
+    def __init__(self, store, github_client_factory=None):
         self.store = store
+        self.github_client_factory = github_client_factory
         self.gateway = FixtureGateway(store.db)
         self.tasks = {task.id: task for task in ASSESSMENT_V1}
 
@@ -37,8 +41,14 @@ class MissionActivities:
             if cached is not None:
                 return cached
             try:
-                result = await self.execute_fixture(request, task, info.attempt, attempt_id)
-                await self.gateway.finish(request, attempt_id, 'completed', result)
+                report = None
+                if request.mission.mission_type in (FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION) and task.id == 'assess':
+                    report = await self.scan_repository(request, attempt_id)
+                    output = task.output if report['status'] == 'complete' else INCOMPLETE_SCAN
+                    result = TaskResult(task.id, output, info.attempt, attempt_id)
+                else:
+                    result = await self.execute_fixture(request, task, info.attempt, attempt_id)
+                await self.gateway.finish(request, attempt_id, 'completed', result, report)
             except asyncio.CancelledError:
                 await self.gateway.finish(request, attempt_id, 'interrupted')
                 raise
@@ -47,11 +57,11 @@ class MissionActivities:
                 raise
             return result
         except FixtureRejected as exc:
-            raise ApplicationError('Fixture was not admitted', type=exc.code,
+            raise ApplicationError('Mission action was not admitted', type=exc.code,
                                    non_retryable=exc.code != ATTEMPT_BUSY) from exc
 
     async def execute_fixture(self, request, task, attempt, attempt_id):
-        # The only adapter has fixed outputs and performs no filesystem, subprocess or network work.
+        # Simulation and orchestration-only steps have fixed outputs.
         for _ in range(5):
             mission = await self.store.get_mission(request.mission)
             if not self.gateway.ready(mission, request.mission, task.id):
@@ -59,3 +69,23 @@ class MissionActivities:
             activity.heartbeat()
             await asyncio.sleep(0.2)
         return TaskResult(task.id, task.output, attempt, attempt_id)
+
+    async def scan_repository(self, request, attempt_id):
+        mission = await self.store.get_mission(request.mission)
+        await self.gateway.keep_alive(request, attempt_id)
+        activity.heartbeat()
+        scan = asyncio.create_task(
+            assess_github_repository(mission, self.github_client_factory)
+            if request.mission.mission_type == GITHUB_SCAN_MISSION else assess_fixture(mission),
+        )
+        try:
+            while not scan.done():
+                await asyncio.wait({scan}, timeout=0.5)
+                if not scan.done():
+                    await self.gateway.keep_alive(request, attempt_id)
+                    activity.heartbeat()
+            return await scan
+        finally:
+            if not scan.done():
+                scan.cancel()
+                await asyncio.gather(scan, return_exceptions=True)

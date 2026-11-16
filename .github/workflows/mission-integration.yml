@@ -32,12 +32,23 @@ jobs:
             'rs.initiate({_id:"havosec_test",members:[{_id:0,host:"127.0.0.1:27017"}]})'
           timeout 60s bash -c 'until docker exec mongo-test mongosh --quiet --eval "quit(db.hello().isWritablePrimary ? 0 : 1)"; do sleep 2; done'
           timeout 60s bash -c 'until docker exec temporal-test temporal operator cluster health; do sleep 2; done'
+      - name: Pull the pinned fixture scanner
+        run: docker pull semgrep/semgrep:1.176.0
       - name: Run the live mission tests
         working-directory: backend
+        env:
+          MISSION_TEST_FIXTURE_COMMIT: ${{ github.sha }}
+          MISSION_TEST_GITHUB_PILOT: KathanGoda26/Tile_Studio,1430214091,550c53858aaddd011fa9d0d2939c98d358859618
+          MISSION_TEST_GITHUB_REPORT: ${{ runner.temp }}/tile-studio-assessment.json
         run: |
           python -c "import temporalio"
-          python -m pytest -q -rs --junitxml=mission-results.xml tests/test_mission_orchestration.py
+          python -m pytest -q -rs -s --junitxml=mission-results.xml tests/test_mission_orchestration.py tests/test_missions.py tests/test_github_client.py tests/test_github_assessment.py
           python -c "from xml.etree import ElementTree as ET; report = ET.parse('mission-results.xml'); assert not report.findall('.//skipped'), 'A mission integration test was skipped'"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tile-studio-assessment
+          path: ${{ runner.temp }}/tile-studio-assessment.json
+          if-no-files-found: error
       - name: Show service logs on failure
         if: failure()
         run: |

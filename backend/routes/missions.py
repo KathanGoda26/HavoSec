@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from core.database import get_database
 from core.domain_api import domain_operation, domain_scope
@@ -45,6 +45,14 @@ async def list_missions(
 @router.get('/{mission_id}', response_model=MissionResponse)
 async def get_mission(mission_id: str, scope=Depends(domain_scope), service=Depends(mission_service)):
     return await domain_operation(service.get(scope, mission_id))
+
+
+@router.get('/{mission_id}/report')
+async def get_mission_report(mission_id: str, scope=Depends(domain_scope), service=Depends(mission_service)):
+    mission = await domain_operation(service.get_document(scope, mission_id))
+    if 'assessment_report' not in mission:
+        raise HTTPException(404, 'Assessment report is unavailable')
+    return execution_view(mission['assessment_report'])
 
 
 @router.post('/{mission_id}/cancel', response_model=MissionResponse, dependencies=[Depends(manage_projects)])

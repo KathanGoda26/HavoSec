@@ -1,6 +1,8 @@
 import asyncio
+import json
 import os
 from dataclasses import replace
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -12,7 +14,8 @@ from core.domain_indexes import ensure_domain_indexes
 from core.ownership import OrganizationScope
 from mission_orchestration.governance import ATTEMPT_BUSY, POLICY_DENIED, FixtureGateway, FixtureRejected
 from mission_orchestration.plan import (
-    APPROVAL_REQUIRED, ASSESSMENT_V1, FixtureAttempt, MissionRef, ProgressEvent, TaskResult, validate_plan,
+    APPROVAL_REQUIRED, ASSESSMENT_V1, FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION, FixtureAttempt, MissionRef,
+    ProgressEvent, TaskResult, validate_plan,
 )
 from mission_orchestration.storage import OrchestrationStore, utc_now
 from repositories.missions import MissionRepository
@@ -108,6 +111,125 @@ def test_mongo_retries_projection_slot_and_cancellation():
         assert finished['orchestration']['version'] == 3
         assert finished['orchestration']['completed'][0]['task_id'] == 'prepare'
         assert (await store.acquire_slot(waiting)).acquired_slot
+
+    asyncio.run(with_test_database(check))
+
+
+def test_temporal_runs_isolated_semgrep_and_reports_gaps():
+    address = os.environ.get('MISSION_TEST_TEMPORAL_ADDRESS')
+    commit = os.environ.get('MISSION_TEST_FIXTURE_COMMIT')
+    if not address or not commit:
+        pytest.skip('Set the Temporal address and fixture commit, and load the pinned Semgrep image')
+    pytest.importorskip('temporalio')
+    from temporalio.client import Client
+    from temporalio.worker import Worker
+
+    from mission_orchestration.activities import MissionActivities
+    from mission_orchestration.dispatcher import MissionDispatcher
+    from mission_orchestration.fixture_assessment import SCANNER_VERSION
+    from mission_orchestration.workflow import RepositoryAssessment
+
+    async def check(db, store):
+        client = await Client.connect(address)
+        queue = 'havosec-fixture-' + uuid4().hex
+        dispatcher = MissionDispatcher(store, client, queue)
+        activities = MissionActivities(store)
+        async with Worker(client, task_queue=queue, workflows=[RepositoryAssessment], activities=[
+            activities.acquire_mission_slot, activities.project_mission_progress, activities.run_mission_fixture,
+        ]):
+            async def run(snapshot, expected):
+                ref = await seed_mission(db, str(ObjectId()))
+                await db.missions.update_one(store.mission_query(ref), {'$set': {
+                    'mission_type': FIXTURE_SCAN_MISSION, 'fixture_commit': snapshot,
+                }})
+                assert await dispatcher.dispatch_one()
+                assert await asyncio.wait_for(client.get_workflow_handle(ref.workflow_id).result(), 100) == expected
+                return (await store.get_mission(ref))['assessment_report']
+
+            report = await run(commit, 'completed')
+            assert report['status'] == 'complete'
+            assert report['commit_sha'] == commit and report['scanner_version'] == SCANNER_VERSION
+            assert len(report['rules_sha256']) == 64
+            assert report['coverage']['scanned'] == ['app.py', 'clean.py']
+            assert not report['gaps']
+            assert report['observations']
+            assert all(item['path'] == 'app.py' and len(item['evidence_sha256']) == 64
+                       for item in report['observations'])
+            assert any(item['rule_id'].endswith('havosec.python.eval') for item in report['observations'])
+
+            report = await run('0' * 40, 'partial')
+            assert report['status'] == 'incomplete' and report['gaps'] and not report['observations']
+
+    asyncio.run(with_test_database(check))
+
+
+def test_temporal_scans_authorized_public_github_snapshot():
+    address = os.environ.get('MISSION_TEST_TEMPORAL_ADDRESS')
+    pilot = os.environ.get('MISSION_TEST_GITHUB_PILOT')
+    if not address or not pilot:
+        pytest.skip('Set a Temporal address and a public pilot snapshot')
+    name, repository_id, commit = pilot.split(',')
+    pytest.importorskip('temporalio')
+    from temporalio.client import Client
+    from temporalio.worker import Worker
+
+    from integrations.github.client import download_repository_archive
+    from mission_orchestration.activities import MissionActivities
+    from mission_orchestration.dispatcher import MissionDispatcher
+    from mission_orchestration.workflow import RepositoryAssessment
+
+    class PublicGitHubArchive:
+        async def download_readonly_archive(self, repository, requested_id, revision, destination, limit):
+            assert (repository, requested_id, revision) == (name, int(repository_id), commit)
+            await download_repository_archive('https://api.github.com', repository, revision, destination, limit)
+
+    async def check(db, store):
+        ref = await seed_mission(db, str(ObjectId()))
+        document = await store.get_mission(ref)
+        identity = store.mission_query(ref)
+        integration = ObjectId()
+        scope = {'organization_id': ref.organization_id}
+        github = {'repository': name, 'repository_id': int(repository_id), 'branch': 'main',
+                  'installation_id': 42, 'integration_id': str(integration)}
+        await db.client_companies.update_one({'_id': ObjectId(ref.organization_id)}, {
+            '$set': {'mission_policy.github_assessment': 'allow'},
+        })
+        await db.github_integrations.insert_one({
+            **scope, '_id': integration, 'installation_id': 42, 'status': 'active',
+            'permissions': {'contents': 'write'},
+        })
+        await db.github_repositories.insert_one({
+            **scope, 'integration_id': str(integration), 'repository_id': int(repository_id), 'full_name': name,
+            'default_branch': 'main', 'authorized': True, 'connection_status': 'active',
+        })
+        await db.assets.update_one({**scope, '_id': ObjectId(document['asset_id'])}, {'$set': {
+            'target': 'https://github.com/' + name,
+            'source_control': {'provider': 'github', 'integration_id': str(integration),
+                               'repository_id': int(repository_id), 'repository_full_name': name,
+                               'default_branch': 'main', 'connection_status': 'active'},
+        }})
+        await db.missions.update_one(identity, {'$set': {
+            'mission_type': GITHUB_SCAN_MISSION, 'source_commit': commit, 'github_scope': github,
+        }})
+        client = await Client.connect(address)
+        queue = 'havosec-real-pilot-' + uuid4().hex
+        activities = MissionActivities(store, github_client_factory=lambda _: PublicGitHubArchive())
+        async with Worker(client, task_queue=queue, workflows=[RepositoryAssessment], activities=[
+            activities.acquire_mission_slot, activities.project_mission_progress, activities.run_mission_fixture,
+        ]):
+            assert await MissionDispatcher(store, client, queue).dispatch_one()
+            status = await asyncio.wait_for(client.get_workflow_handle(ref.workflow_id).result(), timeout=160)
+        report = (await store.get_mission(ref))['assessment_report']
+        report_path = os.environ.get('MISSION_TEST_GITHUB_REPORT')
+        if report_path:
+            Path(report_path).write_text(json.dumps(report, default=str, indent=2) + '\n', encoding='utf-8')
+        assert report['commit_sha'] == commit and report['repository'] == name
+        assert report['coverage']['scanned'], report['gaps']
+        assert status == ('completed' if not report['gaps'] else 'partial')
+        print('Pilot scan:', json.dumps({'repository': name, 'commit': commit,
+                                        'files': len(report['coverage']['scanned']),
+                                        'excluded': report['coverage']['excluded'],
+                                        'observations': len(report['observations']), 'gaps': report['gaps']}))
 
     asyncio.run(with_test_database(check))
 

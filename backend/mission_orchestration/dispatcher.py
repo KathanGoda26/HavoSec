@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from dataclasses import replace
 from datetime import timedelta
 
 from pymongo.errors import PyMongoError
@@ -30,7 +31,7 @@ class MissionDispatcher:
             if document['status'] not in TERMINAL_STATUSES:
                 if command['type'] == 'start_mission':
                     if document.get('orchestration', {}).get('workflow_id') != mission.workflow_id:
-                        await self.start_workflow(mission)
+                        await self.start_workflow(replace(mission, mission_type=document['mission_type']))
                 else:
                     handle = self.client.get_workflow_handle(mission.workflow_id)
                     await handle.signal(CANCEL_SIGNAL, rpc_timeout=RPC_TIMEOUT)

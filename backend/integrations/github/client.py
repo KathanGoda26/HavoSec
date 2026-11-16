@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 import base64
 
 import httpx
@@ -35,11 +35,15 @@ class GitHubAppClient:
         self.settings = settings
         self.transport = transport
 
-    async def create_installation_token(self) -> InstallationToken:
+    async def create_installation_token(self, *, read_repository_id: int | None = None) -> InstallationToken:
+        scope = None if read_repository_id is None else {
+            'repository_ids': [read_repository_id], 'permissions': {'contents': 'read'},
+        }
         payload = await self._request(
             "POST",
             f"/app/installations/{self.settings.installation_id}/access_tokens",
             bearer=create_app_jwt(self.settings),
+            json=scope,
         )
         token = payload.get("token")
         expires_at = payload.get("expires_at")
@@ -88,8 +92,9 @@ class GitHubAppClient:
             and isinstance(repository.get("full_name"), str)
         ]
 
-    async def get_branch_head(self, repository: str, branch: str) -> str:
-        token = await self.create_installation_token()
+    async def get_branch_head(self, repository: str, branch: str, *, read_repository_id: int | None = None) -> str:
+        token = (await self.create_installation_token() if read_repository_id is None
+                 else await self.create_installation_token(read_repository_id=read_repository_id))
         payload = await self._request(
             "GET", f"/repos/{_repository_path(repository)}/git/ref/heads/{quote(branch, safe='')}",
             bearer=token.value,
@@ -98,6 +103,11 @@ class GitHubAppClient:
         if not isinstance(sha, str) or len(sha) != 40:
             raise GitHubAPIError("GitHub returned an invalid branch response")
         return sha
+
+    async def download_readonly_archive(self, repository, repository_id, commit, destination, limit):
+        token = await self.create_installation_token(read_repository_id=repository_id)
+        await download_repository_archive(self.settings.api_url, repository, commit, destination, limit,
+                                          bearer=token.value, transport=self.transport)
 
     async def get_commit(self, repository: str, commit_sha: str) -> dict:
         token = await self.create_installation_token()
@@ -250,6 +260,34 @@ def _repository_path(repository: str) -> str:
     if not owner or not name or any(character.isspace() for character in repository):
         raise GitHubAPIError("GitHub repository identifier is invalid")
     return f"{quote(owner, safe='')}/{quote(name, safe='')}"
+
+
+async def download_repository_archive(api_url, repository, commit, destination, limit, *, bearer=None,
+                                      transport=None):
+    headers = {'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}
+    if bearer:
+        headers['Authorization'] = f'Bearer {bearer}'
+    # Redirects are handled explicitly so the installation token stays on the API request.
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=False, transport=transport) as client:
+            async with client.stream('GET', f'{api_url}/repos/{_repository_path(repository)}/tarball/{commit}',
+                                     headers=headers) as response:
+                location = response.headers.get('location', '')
+                target = urlsplit(location)
+                if response.status_code != 302 or target.scheme != 'https' or target.netloc != 'codeload.github.com':
+                    raise GitHubAPIError('GitHub archive redirect was unavailable or invalid')
+            async with client.stream('GET', location) as response:
+                if response.status_code != 200:
+                    raise GitHubAPIError('GitHub archive could not be downloaded', response.status_code)
+                size = 0
+                with destination.open('xb') as output:
+                    async for chunk in response.aiter_raw():
+                        size += len(chunk)
+                        if size > limit:
+                            raise GitHubAPIError('GitHub archive exceeds the configured size limit')
+                        output.write(chunk)
+    except (httpx.HTTPError, ValueError) as exc:
+        raise GitHubAPIError('GitHub archive request failed') from exc
 
 
 def _sha(payload: dict, kind: str) -> str:

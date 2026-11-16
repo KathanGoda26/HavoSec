@@ -31,15 +31,24 @@ const statusLabels = {
 }
 const actionLabels = { allow: 'Allowed', deny: 'Denied', require_approval: 'Awaiting approval' }
 const fixtureScan = 'fixture_repository_assessment'
+const githubScan = 'github_repository_assessment'
 const missionTitles = {
   repository_assessment: 'Simulated assessment',
   [fixtureScan]: 'Semgrep fixture assessment',
+  [githubScan]: 'GitHub repository assessment',
 }
 const scanGaps = {
   invalid_fixture_commit: 'The fixture commit is invalid.',
   fixture_files_missing_from_scan: 'Some fixture files were outside the scan coverage.',
+  files_missing_from_scan: 'Some eligible files were outside the scan coverage.',
   scanner_reported_errors: 'Semgrep reported errors.',
   fixture_scan_failed: 'The scan could not be completed.',
+  repository_scan_failed: 'The repository scan could not be completed.',
+  github_source_unavailable: 'The pinned source could not be retrieved from GitHub.',
+  invalid_source_commit: 'The repository commit is invalid.',
+  source_limit_exceeded: 'Some source files exceeded the pilot scan limits.',
+  unsafe_source_entry: 'Some source entries could not be materialized safely.',
+  no_supported_source_files: 'There were no supported source files to scan.',
 }
 
 async function loadOptions(list, filters) {
@@ -268,11 +277,12 @@ function MissionRecord({ missionId, organizationId }) {
       <p>Repository asset {organizationId ? names?.asset?.name || mission.asset_id
         : <Link to={`/dashboard/assets/${mission.asset_id}`}>{names?.asset?.name || mission.asset_id}</Link>}</p>
       {names?.asset?.target && <p>{names.asset.target}</p>}
-      {progress && <div aria-label="Fixture task progress">
-        <p>{progress.completed.length} of {progress.total_tasks} fixture tasks complete</p>
-        {progress.current_task && <p>Current task {taskLabels[progress.current_task] || progress.current_task}</p>}
+      {mission.source_commit && <p>Pinned commit <code>{mission.source_commit}</code></p>}
+      {progress && <div aria-label="Mission task progress">
+        <p>{progress.completed.length} of {progress.total_tasks} tasks complete</p>
+        {progress.current_task && <p>Current task {missionTaskLabel(mission, progress.current_task)}</p>}
         {!!progress.completed.length && <ul>
-          {progress.completed.map(task => <li key={task.task_id}>{taskLabels[task.task_id] || task.task_id}</li>)}
+          {progress.completed.map(task => <li key={task.task_id}>{missionTaskLabel(mission, task.task_id)}</li>)}
         </ul>}
       </div>}
       {mission.cancel_requested_at && activeStatuses.has(mission.status) && <p role="status">Cancellation requested</p>}
@@ -282,21 +292,28 @@ function MissionRecord({ missionId, organizationId }) {
       {cancelError && <p className="form-error" role="alert">{cancelError}</p>}
       <button type="button" className="btn-secondary" onClick={reload}>Refresh status</button>
     </Card>}
-    {mission?.mission_type === fixtureScan && progress?.completed.some(task => task.task_id === 'assess') &&
+    {[fixtureScan, githubScan].includes(mission?.mission_type) && progress?.completed.some(task => task.task_id === 'assess') &&
       <MissionReport missionId={missionId} organizationId={organizationId} />}
     {canManage && mission && <MissionActions mission={mission} organizationId={organizationId} onChange={reload} />}
   </div>
+}
+
+function missionTaskLabel(mission, task) {
+  if (mission.mission_type === githubScan && task === 'assess') return 'Scan pinned repository'
+  return taskLabels[task] || task
 }
 
 function MissionReport({ missionId, organizationId }) {
   const { data: report, loading, error, reload } = usePollingResource(
     () => securityApi.getMissionReport(missionId, organizationParams(organizationId)), [missionId, organizationId],
   )
-  return <Card title="Fixture scan report">
+  return <Card title="Scan report">
     <ResourceState loading={loading} error={error} onRetry={reload} noun="scan report" />
     {!loading && !error && report && <>
-      <p>Fixture commit <code>{report.commit_sha}</code></p>
+      {report.repository && <p>{report.repository} · {report.branch}</p>}
+      <p>Commit <code>{report.commit_sha}</code></p>
       <p>Semgrep {report.scanner_version} · {report.coverage.scanned.length} of {report.coverage.expected.length} files scanned</p>
+      {report.coverage.excluded > 0 && <p>{report.coverage.excluded} entries excluded by the source filters</p>}
       {report.gaps.length > 0 && <div role="status">
         <p>Incomplete scan</p>
         <ul>{report.gaps.map(gap => <li key={gap}>{scanGaps[gap] || gap}</li>)}</ul>
@@ -342,7 +359,7 @@ function MissionActions({ mission, organizationId, onChange }) {
   }
 
   if (!loading && !error && !data?.length) return null
-  return <Card title="Fixture actions">
+  return <Card title="Mission actions">
     <ResourceState loading={loading} error={error} onRetry={reload} noun="fixture actions" />
     {!loading && !error && <ul>
       {data.map(action => {
@@ -351,10 +368,10 @@ function MissionActions({ mission, organizationId, onChange }) {
         const current = active && mission.orchestration?.current_task === action.operation
         const waiting = current && action.decision.outcome === 'require_approval'
         return <li key={action.operation}>
-          <strong>{taskLabels[action.operation] || action.operation}</strong>
+          <strong>{missionTaskLabel(mission, action.operation)}</strong>
           <p>{action.result ? 'Completed' : granted ? 'Approved' : actionLabels[action.decision.outcome]}</p>
           {waiting && !granted && <button type="button" className="btn-primary" disabled={pending}
-            onClick={() => changeApproval(action, false)}>Approve fixture action</button>}
+            onClick={() => changeApproval(action, false)}>Approve action</button>}
           {current && granted && !action.result && <button type="button" className="btn-secondary" disabled={pending}
             onClick={() => changeApproval(action, true)}>Revoke approval</button>}
         </li>

@@ -39,11 +39,15 @@ async def git_blob(commit, relative_path, workspace):
     return result.stdout
 
 
-class IsolatedFixtureScanner(SemgrepScanner):
+class IsolatedSemgrepScanner(SemgrepScanner):
+    def __init__(self, *args, targets=FIXTURE_FILES, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.targets = targets
+
     async def _run(self, workspace):
         docker = shutil.which('docker')
         if not docker or os.name != 'posix':
-            raise DependencyUnavailable('The fixture scanner requires a local Linux Docker engine')
+            raise DependencyUnavailable('Isolated scanning requires a local Linux Docker engine')
         name = f'havosec-fixture-{uuid4().hex}'
         host = [docker, '--host', 'unix:///var/run/docker.sock']
         options = {'cwd': workspace.repository, 'environment': controlled_environment()}
@@ -56,7 +60,7 @@ class IsolatedFixtureScanner(SemgrepScanner):
                 '--env', 'SEMGREP_SEND_METRICS=off', '--entrypoint', 'semgrep',
                 '--volume', f'{workspace.repository}:/src:ro',
                 '--volume', f'{workspace.artifacts / "rules.yml"}:/rules.yml:ro',
-                '--workdir', '/src', SCANNER_IMAGE, *self.arguments('/rules.yml', *FIXTURE_FILES),
+                '--workdir', '/src', SCANNER_IMAGE, *self.arguments('/rules.yml', *self.targets),
             ], **options, timeout=self.timeout, max_output_bytes=self.max_output_bytes,
                 artifact_prefix=str(workspace.artifacts / 'semgrep'))
         finally:
@@ -68,60 +72,70 @@ class IsolatedFixtureScanner(SemgrepScanner):
                 pass
 
 
-async def assess_fixture(mission, scanner=None):
-    commit = mission.get('fixture_commit')
-    report = {
+def new_assessment_report(commit, expected=()):
+    return {
         'status': 'incomplete', 'commit_sha': commit, 'scanner': 'semgrep', 'scanner_version': SCANNER_VERSION,
-        'rules_sha256': None, 'coverage': {'expected': list(FIXTURE_FILES), 'scanned': [], 'missing': list(FIXTURE_FILES)},
+        'rules_sha256': None, 'coverage': {'expected': list(expected), 'scanned': [], 'missing': list(expected)},
         'observations': [], 'gaps': [], 'captured_at': datetime.now(timezone.utc),
     }
+
+
+async def populate_scan_report(report, mission, workspace, scanner, *, repository, branch=None):
+    expected = set(report['coverage']['expected'])
+    result = await scanner.scan(workspace)
+    if result.scanner_version != SCANNER_VERSION:
+        raise ExecutionError('Unexpected Semgrep version')
+    scanned = {safe_path(path) for path in result.metadata['scanned_paths']}
+    if not scanned <= expected:
+        raise ValueError('Unexpected coverage path')
+    missing = sorted(expected - scanned)
+    report['coverage'].update(scanned=sorted(scanned), missing=missing)
+    if missing:
+        report['gaps'].append('files_missing_from_scan')
+    if result.errors:
+        report['gaps'].append('scanner_reported_errors')
+    context = SimpleNamespace(repository=repository, branch=branch, commit_sha=report['commit_sha'],
+                              organization_id=mission['organization_id'], project_id=mission['project_id'],
+                              asset_id=mission['asset_id'], security_run_id=str(mission['_id']))
+    observations, lines = [], {}
+    for candidate in normalize_semgrep(result, context):
+        path = candidate.file_path
+        if path not in scanned:
+            raise ValueError('Observation is outside the reported scan coverage')
+        if path not in lines:
+            lines[path] = (workspace.repository / path).read_bytes().splitlines(keepends=True)
+        if candidate.end_line > len(lines[path]):
+            raise ValueError('Observation is outside the reported file')
+        evidence = b''.join(lines[path][candidate.start_line - 1:candidate.end_line])
+        observations.append({
+            'rule_id': candidate.rule_id, 'severity': candidate.severity.value, 'path': path,
+            'start_line': candidate.start_line, 'end_line': candidate.end_line,
+            'evidence_sha256': sha256(evidence).hexdigest(),
+        })
+    report['observations'] = observations
+    report['captured_at'] = result.completed_at
+    if not report['gaps']:
+        report['status'] = 'complete'
+
+
+async def assess_fixture(mission, scanner=None):
+    commit = mission.get('fixture_commit')
+    report = new_assessment_report(commit, FIXTURE_FILES)
     if not isinstance(commit, str) or not re.fullmatch('[0-9a-f]{40}', commit):
         report['gaps'].append('invalid_fixture_commit')
         return report
     if scanner is None:
-        scanner = IsolatedFixtureScanner(timeout=40, max_output_bytes=512_000, max_findings=50)
+        scanner = IsolatedSemgrepScanner(timeout=40, max_output_bytes=512_000, max_findings=50)
     try:
-        files = {}
         with RunWorkspace(mission['_id']) as workspace:
             workspace.repository.mkdir()
             for name in FIXTURE_FILES:
                 data = await git_blob(commit, f'{FIXTURE_DIR}/{name}', workspace)
-                files[name] = data.splitlines(keepends=True)
                 (workspace.repository / name).write_bytes(data)
             rules = await git_blob(commit, RULE_PATH, workspace)
             (workspace.artifacts / 'rules.yml').write_bytes(rules)
             report['rules_sha256'] = sha256(rules).hexdigest()
-            result = await scanner.scan(workspace)
-        if result.scanner_version != SCANNER_VERSION:
-            raise ExecutionError('Unexpected Semgrep version')
-        scanned = {safe_path(path) for path in result.metadata['scanned_paths']}
-        if not scanned <= set(FIXTURE_FILES):
-            raise ValueError('Unexpected coverage path')
-        missing = sorted(set(FIXTURE_FILES) - scanned)
-        report['coverage'].update(scanned=sorted(scanned), missing=missing)
-        if missing:
-            report['gaps'].append('fixture_files_missing_from_scan')
-        if result.errors:
-            report['gaps'].append('scanner_reported_errors')
-        context = SimpleNamespace(repository='HavoSec fixture', branch=None, commit_sha=commit,
-                                  organization_id=mission['organization_id'], project_id=mission['project_id'],
-                                  asset_id=mission['asset_id'], security_run_id=str(mission['_id']))
-        candidates = normalize_semgrep(result, context)
-        observations = []
-        for candidate in candidates:
-            path = candidate.file_path
-            if path not in scanned or candidate.end_line > len(files[path]):
-                raise ValueError('Observation is outside the reported scan coverage')
-            evidence = b''.join(files[path][candidate.start_line - 1:candidate.end_line])
-            observations.append({
-                'rule_id': candidate.rule_id, 'severity': candidate.severity.value, 'path': path,
-                'start_line': candidate.start_line, 'end_line': candidate.end_line,
-                'evidence_sha256': sha256(evidence).hexdigest(),
-            })
-        report['observations'] = observations
-        report['captured_at'] = result.completed_at
-        if not report['gaps']:
-            report['status'] = 'complete'
+            await populate_scan_report(report, mission, workspace, scanner, repository='HavoSec fixture')
     except (ExecutionError, OSError, ValueError, KeyError):
         report['gaps'].append('fixture_scan_failed')
     return report

@@ -5,6 +5,7 @@ WORKFLOW_TYPE = 'RepositoryAssessmentV1'
 PLAN_VERSION = 1
 APPROVAL_REQUIRED = 'FixtureApprovalRequired'
 FIXTURE_SCAN_MISSION = 'fixture_repository_assessment'
+GITHUB_SCAN_MISSION = 'github_repository_assessment'
 INCOMPLETE_SCAN = 'fixture_scan_incomplete'
 CANCEL_SIGNAL = 'request_cancellation'
 TERMINAL_STATUSES = frozenset({'completed', 'partial', 'failed', 'cancelled', 'needs_review'})

@@ -7,7 +7,10 @@ from uuid import uuid4
 
 from bson import ObjectId
 from fastapi import HTTPException
-from mission_orchestration.plan import APPROVAL_REQUIRED, ASSESSMENT_V1, FIXTURE_SCAN_MISSION, PLAN_VERSION, TaskResult
+from mission_orchestration.github_scope import authorized_github_scope
+from mission_orchestration.plan import (
+    APPROVAL_REQUIRED, ASSESSMENT_V1, FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION, PLAN_VERSION, TaskResult,
+)
 from mission_orchestration.storage import OrchestrationStore, utc_now
 from utils.auth import possible_ids, serialize_user
 
@@ -75,7 +78,7 @@ class FixtureGateway:
     async def policy(self, mission, session):
         organization_id = mission['organization_id']
         ids = [organization_id, mission.get('project_id'), mission.get('asset_id')]
-        if (mission.get('mission_type') not in {'repository_assessment', FIXTURE_SCAN_MISSION}
+        if (mission.get('mission_type') not in {'repository_assessment', FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION}
                 or not all(ObjectId.is_valid(i) for i in ids)):
             return 'deny', 'invalid_mission_scope', None
 
@@ -97,7 +100,13 @@ class FixtureGateway:
             return 'deny', 'target_changed', target
 
         modes = organization.get('mission_policy', {})
-        mode = modes.get('fixture', 'allow') if isinstance(modes, dict) else None
+        if mission['mission_type'] == GITHUB_SCAN_MISSION:
+            github = await authorized_github_scope(self.db, organization_id, asset, session)
+            if not github or github != mission.get('github_scope'):
+                return 'deny', 'github_authorization_changed', target
+            mode = modes.get('github_assessment', 'deny') if isinstance(modes, dict) else None
+        else:
+            mode = modes.get('fixture', 'allow') if isinstance(modes, dict) else None
         if mode not in ('allow', 'deny', 'require_approval'):
             return 'deny', 'unknown_policy', target
         return mode, 'organization_policy', target
@@ -127,6 +136,11 @@ class FixtureGateway:
                        'operation': task.id, 'inputs': task.inputs, 'target_digest': target}
             if mission['mission_type'] == FIXTURE_SCAN_MISSION:
                 binding.update(mission_type=FIXTURE_SCAN_MISSION, fixture_commit=mission.get('fixture_commit'))
+            elif mission['mission_type'] == GITHUB_SCAN_MISSION:
+                binding.update(mission_type=GITHUB_SCAN_MISSION, github_scope=mission.get('github_scope'),
+                               source_commit=mission.get('source_commit'))
+                if decision == 'require_approval' and task.id != 'assess':
+                    decision, reason = 'allow', 'no_repository_access'
             action_digest = digest(binding)
             if mission.get('mission_type') != request.mission.mission_type:
                 decision, reason = 'deny', 'mission_type_changed'

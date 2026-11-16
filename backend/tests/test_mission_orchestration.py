@@ -12,7 +12,8 @@ from core.domain_indexes import ensure_domain_indexes
 from core.ownership import OrganizationScope
 from mission_orchestration.governance import ATTEMPT_BUSY, POLICY_DENIED, FixtureGateway, FixtureRejected
 from mission_orchestration.plan import (
-    APPROVAL_REQUIRED, ASSESSMENT_V1, FixtureAttempt, MissionRef, ProgressEvent, TaskResult, validate_plan,
+    APPROVAL_REQUIRED, ASSESSMENT_V1, FIXTURE_SCAN_MISSION, FixtureAttempt, MissionRef, ProgressEvent, TaskResult,
+    validate_plan,
 )
 from mission_orchestration.storage import OrchestrationStore, utc_now
 from repositories.missions import MissionRepository
@@ -108,6 +109,54 @@ def test_mongo_retries_projection_slot_and_cancellation():
         assert finished['orchestration']['version'] == 3
         assert finished['orchestration']['completed'][0]['task_id'] == 'prepare'
         assert (await store.acquire_slot(waiting)).acquired_slot
+
+    asyncio.run(with_test_database(check))
+
+
+def test_temporal_runs_isolated_semgrep_and_reports_gaps():
+    address = os.environ.get('MISSION_TEST_TEMPORAL_ADDRESS')
+    commit = os.environ.get('MISSION_TEST_FIXTURE_COMMIT')
+    if not address or not commit:
+        pytest.skip('Set the Temporal address and fixture commit, and load the pinned Semgrep image')
+    pytest.importorskip('temporalio')
+    from temporalio.client import Client
+    from temporalio.worker import Worker
+
+    from mission_orchestration.activities import MissionActivities
+    from mission_orchestration.dispatcher import MissionDispatcher
+    from mission_orchestration.fixture_assessment import SCANNER_VERSION
+    from mission_orchestration.workflow import RepositoryAssessment
+
+    async def check(db, store):
+        client = await Client.connect(address)
+        queue = 'havosec-fixture-' + uuid4().hex
+        dispatcher = MissionDispatcher(store, client, queue)
+        activities = MissionActivities(store)
+        async with Worker(client, task_queue=queue, workflows=[RepositoryAssessment], activities=[
+            activities.acquire_mission_slot, activities.project_mission_progress, activities.run_mission_fixture,
+        ]):
+            async def run(snapshot, expected):
+                ref = await seed_mission(db, str(ObjectId()))
+                await db.missions.update_one(store.mission_query(ref), {'$set': {
+                    'mission_type': FIXTURE_SCAN_MISSION, 'fixture_commit': snapshot,
+                }})
+                assert await dispatcher.dispatch_one()
+                assert await asyncio.wait_for(client.get_workflow_handle(ref.workflow_id).result(), 100) == expected
+                return (await store.get_mission(ref))['assessment_report']
+
+            report = await run(commit, 'completed')
+            assert report['status'] == 'complete'
+            assert report['commit_sha'] == commit and report['scanner_version'] == SCANNER_VERSION
+            assert len(report['rules_sha256']) == 64
+            assert report['coverage']['scanned'] == ['app.py', 'clean.py']
+            assert not report['gaps']
+            assert report['observations']
+            assert all(item['path'] == 'app.py' and len(item['evidence_sha256']) == 64
+                       for item in report['observations'])
+            assert any(item['rule_id'].endswith('havosec.python.eval') for item in report['observations'])
+
+            report = await run('0' * 40, 'partial')
+            assert report['status'] == 'incomplete' and report['gaps'] and not report['observations']
 
     asyncio.run(with_test_database(check))
 

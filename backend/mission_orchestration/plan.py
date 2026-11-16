@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 WORKFLOW_TYPE = 'RepositoryAssessmentV1'
 PLAN_VERSION = 1
 APPROVAL_REQUIRED = 'FixtureApprovalRequired'
+FIXTURE_SCAN_MISSION = 'fixture_repository_assessment'
+INCOMPLETE_SCAN = 'fixture_scan_incomplete'
 CANCEL_SIGNAL = 'request_cancellation'
 TERMINAL_STATUSES = frozenset({'completed', 'partial', 'failed', 'cancelled', 'needs_review'})
 
@@ -12,6 +14,7 @@ TERMINAL_STATUSES = frozenset({'completed', 'partial', 'failed', 'cancelled', 'n
 class MissionRef:
     organization_id: str
     mission_id: str
+    mission_type: str = 'repository_assessment'
 
     @property
     def workflow_id(self):

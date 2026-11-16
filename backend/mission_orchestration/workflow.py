@@ -6,7 +6,7 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
 from mission_orchestration.plan import (
-    APPROVAL_REQUIRED, ASSESSMENT_V1, CANCEL_SIGNAL, TERMINAL_STATUSES, WORKFLOW_TYPE,
+    APPROVAL_REQUIRED, ASSESSMENT_V1, CANCEL_SIGNAL, FIXTURE_SCAN_MISSION, INCOMPLETE_SCAN, TERMINAL_STATUSES, WORKFLOW_TYPE,
     FixtureAttempt, MissionRef, ProgressEvent,
     ProgressState, TaskResult, validate_plan,
 )
@@ -75,16 +75,17 @@ class RepositoryAssessment:
             outcome = await self.run_task(task)
             if outcome:
                 return outcome
-        return 'completed'
+        return 'partial' if any(result.output == INCOMPLETE_SCAN for result in self.completed) else 'completed'
 
     async def run_task(self, task):
         poll = 0
         approval_deadline = None
+        deadline = 75 if self.mission.mission_type == FIXTURE_SCAN_MISSION and task.id == 'assess' else task.deadline_seconds
         while not self.cancel_requested:
             self.active_task = workflow.start_activity(
                 'run_mission_fixture', FixtureAttempt(self.mission, task.id), result_type=TaskResult,
                 activity_id=task.id if not poll else f'{task.id}-approval-{poll}',
-                start_to_close_timeout=timedelta(seconds=task.deadline_seconds),
+                start_to_close_timeout=timedelta(seconds=deadline),
                 heartbeat_timeout=timedelta(seconds=3),
                 retry_policy=RetryPolicy(maximum_attempts=task.max_attempts, maximum_interval=timedelta(seconds=5)),
                 cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,

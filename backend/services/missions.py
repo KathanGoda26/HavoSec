@@ -1,11 +1,14 @@
 import hashlib
 import json
+import os
+import re
 from datetime import datetime, timezone
 
 from bson import ObjectId
 from fastapi import HTTPException
 
 from core.domain_api import document_view
+from mission_orchestration.plan import FIXTURE_SCAN_MISSION
 from services.project_resources import ProjectResourceService
 
 
@@ -26,11 +29,16 @@ class MissionService(ProjectResourceService):
             'project_id': payload.project_id.lower(),
             'asset_id': payload.asset_id.lower(),
             'objective': payload.objective,
-            'mission_type': 'repository_assessment',
+            'mission_type': payload.mission_type,
         }
         digest = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
         existing = await self.repository.get_by_key(scope, request_key)
         if existing is None:
+            if payload.mission_type == FIXTURE_SCAN_MISSION:
+                commit = os.environ.get('MISSION_FIXTURE_COMMIT', '')
+                if not re.fullmatch('[0-9a-f]{40}', commit):
+                    raise HTTPException(503, 'Fixture scanning is not configured')
+                inputs['fixture_commit'] = commit
             project_id = await self.active_project(scope, inputs['project_id'])
             asset = await self.assets.get_document(scope, inputs['asset_id'])
             if asset['project_id'] != project_id:

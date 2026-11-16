@@ -30,6 +30,17 @@ const statusLabels = {
   needs_review: 'Needs review',
 }
 const actionLabels = { allow: 'Allowed', deny: 'Denied', require_approval: 'Awaiting approval' }
+const fixtureScan = 'fixture_repository_assessment'
+const missionTitles = {
+  repository_assessment: 'Simulated assessment',
+  [fixtureScan]: 'Semgrep fixture assessment',
+}
+const scanGaps = {
+  invalid_fixture_commit: 'The fixture commit is invalid.',
+  fixture_files_missing_from_scan: 'Some fixture files were outside the scan coverage.',
+  scanner_reported_errors: 'Semgrep reported errors.',
+  fixture_scan_failed: 'The scan could not be completed.',
+}
 
 async function loadOptions(list, filters) {
   const items = []
@@ -50,6 +61,7 @@ function CreateMission({ organizationId }) {
   const [projectId, setProjectId] = useState('')
   const [assetId, setAssetId] = useState('')
   const [objective, setObjective] = useState('')
+  const [missionType, setMissionType] = useState('repository_assessment')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const inFlight = useRef(false)
@@ -76,7 +88,7 @@ function CreateMission({ organizationId }) {
     inFlight.current = true
     setSubmitting(true)
     setSubmitError('')
-    const payload = { project_id: projectId, asset_id: assetId, objective: objective.trim() }
+    const payload = { project_id: projectId, asset_id: assetId, objective: objective.trim(), mission_type: missionType }
     const signature = JSON.stringify(payload)
     try {
       if (!requestKeys.current.has(signature)) {
@@ -116,6 +128,11 @@ function CreateMission({ organizationId }) {
         </label>
         <label className="mission-objective">Objective
           <textarea required maxLength={1000} value={objective} disabled={submitting} onChange={event => setObjective(event.target.value)} />
+        </label>
+        <label>Assessment type
+          <select value={missionType} disabled={submitting} onChange={event => setMissionType(event.target.value)}>
+            {Object.entries(missionTitles).map(([type, label]) => <option key={type} value={type}>{label}</option>)}
+          </select>
         </label>
         <button type="submit" className="btn-primary" disabled={submitting || !canSubmit}>{submitting ? 'Queueing…' : 'Queue mission'}</button>
       </form>
@@ -242,7 +259,7 @@ function MissionRecord({ missionId, organizationId }) {
     <Link to={`${missionPath}${organizationQuery(organizationId)}`}>← Mission Control</Link>
     <h1 className="page-title">Mission details</h1>
     <ResourceState loading={loading || (!mission && !error)} error={error} onRetry={reload} noun="mission" />
-    {!loading && !error && mission && <Card title="Repository assessment">
+    {!loading && !error && mission && <Card title={missionTitles[mission.mission_type] || 'Repository assessment'}>
       <MissionStatus status={mission.status} />
       <p>Updated {displayDate(mission.updated_at)}</p>
       <p className="mission-objective-text">{mission.objective}</p>
@@ -265,8 +282,33 @@ function MissionRecord({ missionId, organizationId }) {
       {cancelError && <p className="form-error" role="alert">{cancelError}</p>}
       <button type="button" className="btn-secondary" onClick={reload}>Refresh status</button>
     </Card>}
+    {mission?.mission_type === fixtureScan && progress?.completed.some(task => task.task_id === 'assess') &&
+      <MissionReport missionId={missionId} organizationId={organizationId} />}
     {canManage && mission && <MissionActions mission={mission} organizationId={organizationId} onChange={reload} />}
   </div>
+}
+
+function MissionReport({ missionId, organizationId }) {
+  const { data: report, loading, error, reload } = usePollingResource(
+    () => securityApi.getMissionReport(missionId, organizationParams(organizationId)), [missionId, organizationId],
+  )
+  return <Card title="Fixture scan report">
+    <ResourceState loading={loading} error={error} onRetry={reload} noun="scan report" />
+    {!loading && !error && report && <>
+      <p>Fixture commit <code>{report.commit_sha}</code></p>
+      <p>Semgrep {report.scanner_version} · {report.coverage.scanned.length} of {report.coverage.expected.length} files scanned</p>
+      {report.gaps.length > 0 && <div role="status">
+        <p>Incomplete scan</p>
+        <ul>{report.gaps.map(gap => <li key={gap}>{scanGaps[gap] || gap}</li>)}</ul>
+      </div>}
+      {report.observations.length > 0 ? <ul aria-label="Scanner observations">
+        {report.observations.map((item, index) => <li key={`${item.path}:${item.start_line}:${item.rule_id}:${index}`}>
+          <strong>{item.rule_id}</strong> · {item.severity} · {item.path}:{item.start_line}
+          <p>Evidence hash <code>{item.evidence_sha256}</code></p>
+        </li>)}
+      </ul> : report.status === 'complete' && <p>No rule matches in the scanned files.</p>}
+    </>}
+  </Card>
 }
 
 function MissionActions({ mission, organizationId, onChange }) {

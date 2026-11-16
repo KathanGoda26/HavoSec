@@ -46,5 +46,23 @@ def test_outbox_failure_rolls_back_mission():
     assert response.status_code == 503
     assert not db.missions.documents
     assert not db.mission_outbox.documents
+
+
+def test_fixture_report_is_scoped_and_pins_the_operator_commit(monkeypatch):
+    app, db, identity, payload = mission_setup()
+    scan = {**payload, 'mission_type': 'fixture_repository_assessment'}
+    monkeypatch.delenv('MISSION_FIXTURE_COMMIT', raising=False)
+    assert submit(app, scan).status_code == 503
+    commit = 'a' * 40
+    monkeypatch.setenv('MISSION_FIXTURE_COMMIT', commit)
+    created = submit(app, scan)
+    assert created.status_code == 201, created.text
+    assert db.missions.documents[0]['fixture_commit'] == commit
+    path = f"/api/missions/{created.json()['id']}/report"
+    assert request(app, 'GET', path).status_code == 404
+    db.missions.documents[0]['assessment_report'] = {'commit_sha': commit, 'status': 'complete'}
+    assert request(app, 'GET', path).json()['commit_sha'] == commit
+    identity['organizationId'] = ORG_B
+    assert request(app, 'GET', path).status_code == 404
     db.mission_outbox.fail_insert = False
     assert submit(app, payload).status_code == 201

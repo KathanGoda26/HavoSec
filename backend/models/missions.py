@@ -1,7 +1,9 @@
 from datetime import datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from mission_orchestration.plan import FIXTURE_SCAN_MISSION
 
 
 class MissionStatus(str, Enum):
@@ -21,6 +23,7 @@ class MissionCreate(BaseModel):
     project_id: str = Field(pattern=r'^[0-9a-fA-F]{24}$')
     asset_id: str = Field(pattern=r'^[0-9a-fA-F]{24}$')
     objective: str = Field(min_length=1, max_length=1000)
+    mission_type: Literal['repository_assessment', FIXTURE_SCAN_MISSION] = 'repository_assessment'
 
 
 class MissionTaskResult(BaseModel):

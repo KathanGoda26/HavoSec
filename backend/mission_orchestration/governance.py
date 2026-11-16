@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from bson import ObjectId
 from fastapi import HTTPException
-from mission_orchestration.plan import APPROVAL_REQUIRED, ASSESSMENT_V1, PLAN_VERSION, TaskResult
+from mission_orchestration.plan import APPROVAL_REQUIRED, ASSESSMENT_V1, FIXTURE_SCAN_MISSION, PLAN_VERSION, TaskResult
 from mission_orchestration.storage import OrchestrationStore, utc_now
 from utils.auth import possible_ids, serialize_user
 
@@ -75,7 +75,8 @@ class FixtureGateway:
     async def policy(self, mission, session):
         organization_id = mission['organization_id']
         ids = [organization_id, mission.get('project_id'), mission.get('asset_id')]
-        if mission.get('mission_type') != 'repository_assessment' or not all(ObjectId.is_valid(i) for i in ids):
+        if (mission.get('mission_type') not in {'repository_assessment', FIXTURE_SCAN_MISSION}
+                or not all(ObjectId.is_valid(i) for i in ids)):
             return 'deny', 'invalid_mission_scope', None
 
         organization = await self.db.client_companies.find_one({'_id': ObjectId(organization_id)}, session=session)
@@ -121,9 +122,14 @@ class FixtureGateway:
             path = f'fixture_actions.{task.id}'
             record = mission.get('fixture_actions', {}).get(task.id)
             decision, reason, target = await self.policy(mission, session)
-            action_digest = digest({'organization_id': request.mission.organization_id,
-                                    'mission_id': request.mission.mission_id, 'plan_version': PLAN_VERSION,
-                                    'operation': task.id, 'inputs': task.inputs, 'target_digest': target})
+            binding = {'organization_id': request.mission.organization_id,
+                       'mission_id': request.mission.mission_id, 'plan_version': PLAN_VERSION,
+                       'operation': task.id, 'inputs': task.inputs, 'target_digest': target}
+            if mission['mission_type'] == FIXTURE_SCAN_MISSION:
+                binding.update(mission_type=FIXTURE_SCAN_MISSION, fixture_commit=mission.get('fixture_commit'))
+            action_digest = digest(binding)
+            if mission.get('mission_type') != request.mission.mission_type:
+                decision, reason = 'deny', 'mission_type_changed'
             if record is None:
                 record = {'digest': action_digest, 'plan_version': PLAN_VERSION, 'operation': task.id,
                           'attempts': [], 'approval': None}
@@ -196,7 +202,19 @@ class FixtureGateway:
             raise FixtureRejected(error)
         return result
 
-    async def finish(self, request, attempt_id, state, result=None):
+    async def keep_alive(self, request, attempt_id):
+        path = f'fixture_actions.{request.task_id}.attempts'
+        filters = {**OrchestrationStore.mission_query(request.mission), 'status': 'running',
+                   'cancel_requested_at': None, 'orchestration.slot': True,
+                   'orchestration.current_task': request.task_id,
+                   path: {'$elemMatch': {'id': attempt_id, 'state': 'running'}}}
+        updated = await self.db.missions.update_one(filters, {'$set': {
+            f'{path}.$.lease_expires_at': utc_now() + timedelta(seconds=4),
+        }})
+        if not updated.matched_count:
+            raise FixtureRejected(POLICY_DENIED)
+
+    async def finish(self, request, attempt_id, state, result=None, report=None):
         path = f'fixture_actions.{request.task_id}'
         identity = OrchestrationStore.mission_query(request.mission)
         filters = {**identity, f'{path}.attempts': {'$elemMatch': {'id': attempt_id, 'state': 'running'}}}
@@ -205,6 +223,8 @@ class FixtureGateway:
             changes[f'{path}.result'] = asdict(result)
             filters.update(status='running', cancel_requested_at=None,
                            **{'orchestration.slot': True, 'orchestration.current_task': request.task_id})
+        if report is not None:
+            changes['assessment_report'] = report
         updated = await self.db.missions.update_one(filters, {'$set': changes})
         if result is not None and not updated.matched_count:
             raise FixtureRejected(POLICY_DENIED)

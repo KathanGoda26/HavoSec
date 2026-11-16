@@ -70,19 +70,24 @@ def test_explicit_indexes_are_scoped_with_documented_worker_exceptions():
     unique_names = set()
     global_indexes = {'installation_unique', 'status_updated', 'integration_repository_unique',
                       'expires_ttl', 'delivery_ttl'}
-    for indexes in specs.values():
+    for collection, indexes in specs.items():
         assert len({index.document['name'] for index in indexes}) == len(indexes)
         for index in indexes:
             if index.document['name'] == 'created_ttl':
                 assert list(index.document['key']) == ['created_at']
                 assert index.document['expireAfterSeconds'] == 2592000
+            elif collection == 'mission_outbox':
+                # The dispatcher claims pending work for all organizations.
+                assert index.document['name'] in {'pending_commands', 'dispatch_schedule'}
+                assert next(iter(index.document['key'])) == 'status'
             elif index.document['name'] not in global_indexes:
                 assert next(iter(index.document['key'])) == 'organization_id'
             if index.document.get('unique', False):
                 unique_names.add(index.document['name'])
     assert unique_names == {'org_fingerprint', 'org_run_scanner', 'organization_unique',
                             'installation_unique', 'org_repository_unique',
-                            'integration_repository_unique', 'one_pr_per_remediation'}
+                            'integration_repository_unique', 'one_pr_per_remediation',
+                            'org_request_key', 'org_mission_slot'}
     db = {name: AsyncMock() for name in specs}
     asyncio.run(ensure_domain_indexes(db))
     for name in specs:

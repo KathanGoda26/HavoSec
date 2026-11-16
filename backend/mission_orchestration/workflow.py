@@ -3,10 +3,11 @@ from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ActivityError
+from temporalio.exceptions import ActivityError, ApplicationError
 
 from mission_orchestration.plan import (
-    ASSESSMENT_V1, CANCEL_SIGNAL, TERMINAL_STATUSES, WORKFLOW_TYPE, FixtureAttempt, MissionRef, ProgressEvent,
+    APPROVAL_REQUIRED, ASSESSMENT_V1, CANCEL_SIGNAL, TERMINAL_STATUSES, WORKFLOW_TYPE,
+    FixtureAttempt, MissionRef, ProgressEvent,
     ProgressState, TaskResult, validate_plan,
 )
 
@@ -71,20 +72,43 @@ class RepositoryAssessment:
             await self.project('running', task.id)
             if self.cancel_requested:
                 break
+            outcome = await self.run_task(task)
+            if outcome:
+                return outcome
+        return 'completed'
+
+    async def run_task(self, task):
+        poll = 0
+        approval_deadline = None
+        while not self.cancel_requested:
             self.active_task = workflow.start_activity(
                 'run_mission_fixture', FixtureAttempt(self.mission, task.id), result_type=TaskResult,
-                activity_id=task.id, start_to_close_timeout=timedelta(seconds=task.deadline_seconds),
+                activity_id=task.id if not poll else f'{task.id}-approval-{poll}',
+                start_to_close_timeout=timedelta(seconds=task.deadline_seconds),
                 heartbeat_timeout=timedelta(seconds=3),
                 retry_policy=RetryPolicy(maximum_attempts=task.max_attempts, maximum_interval=timedelta(seconds=5)),
                 cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
             )
             try:
                 self.completed.append(await self.active_task)
-            except ActivityError:
-                return 'partial' if self.completed else 'failed'
+                return None
+            except ActivityError as exc:
+                if not isinstance(exc.cause, ApplicationError) or exc.cause.type != APPROVAL_REQUIRED:
+                    return 'partial' if self.completed else 'failed'
+                if not workflow.patched('fixture-approval-v1'):
+                    return 'partial' if self.completed else 'failed'
             finally:
                 self.active_task = None
-        return 'completed'
+            if approval_deadline is None:
+                approval_deadline = workflow.now() + timedelta(minutes=30)
+                await self.project('awaiting_approval', task.id)
+            if workflow.now() >= approval_deadline:
+                return 'needs_review'
+            try:
+                await workflow.wait_condition(lambda: self.cancel_requested, timeout=10)
+            except TimeoutError:
+                poll += 1
+        return None
 
     async def project(self, status, current_task=None):
         self.version += 1

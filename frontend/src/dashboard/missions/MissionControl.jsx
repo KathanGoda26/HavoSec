@@ -29,6 +29,7 @@ const statusLabels = {
   cancelled: 'Cancelled',
   needs_review: 'Needs review',
 }
+const actionLabels = { allow: 'Allowed', deny: 'Denied', require_approval: 'Awaiting approval' }
 
 async function loadOptions(list, filters) {
   const items = []
@@ -211,8 +212,8 @@ function MissionRecord({ missionId, organizationId }) {
     { shouldPoll: mission => activeStatuses.has(mission.status) })
   const mission = data
   const progress = mission?.orchestration
-  const canCancel = (role === USER_ROLES.ADMIN || role === USER_ROLES.SUPERADMIN)
-    && activeStatuses.has(mission?.status) && !mission?.cancel_requested_at
+  const canManage = role === USER_ROLES.ADMIN || role === USER_ROLES.SUPERADMIN
+  const canCancel = canManage && activeStatuses.has(mission?.status) && !mission?.cancel_requested_at
   const scope = usePollingResource(async () => {
     if (!mission) return null
     const [project, asset] = await Promise.allSettled([
@@ -264,5 +265,59 @@ function MissionRecord({ missionId, organizationId }) {
       {cancelError && <p className="form-error" role="alert">{cancelError}</p>}
       <button type="button" className="btn-secondary" onClick={reload}>Refresh status</button>
     </Card>}
+    {canManage && mission && <MissionActions mission={mission} organizationId={organizationId} onChange={reload} />}
   </div>
+}
+
+function MissionActions({ mission, organizationId, onChange }) {
+  const params = organizationParams(organizationId)
+  const [pending, setPending] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const active = activeStatuses.has(mission.status) && !mission.cancel_requested_at
+  const { data, loading, error, reload } = usePollingResource(
+    () => securityApi.listMissionActions(mission.id, params), [mission.id, organizationId, mission.status],
+    { shouldPoll: () => active },
+  )
+
+  async function changeApproval(action, revoke) {
+    setPending(true)
+    setActionError('')
+    try {
+      if (revoke) {
+        await securityApi.revokeMissionApproval(mission.id, action.operation, action.approval.id, action.digest, params)
+      } else {
+        await securityApi.approveMissionAction(mission.id, action.operation, action.digest, params)
+      }
+      reload()
+      onChange()
+    } catch (requestError) {
+      const message = getApiError(requestError, 'The approval could not be updated.')
+      setActionError(typeof message === 'string' ? message : 'The approval could not be updated.')
+      reload()
+    } finally {
+      setPending(false)
+    }
+  }
+
+  if (!loading && !error && !data?.length) return null
+  return <Card title="Fixture actions">
+    <ResourceState loading={loading} error={error} onRetry={reload} noun="fixture actions" />
+    {!loading && !error && <ul>
+      {data.map(action => {
+        const approval = action.approval
+        const granted = approval && !approval.revoked_at && Date.parse(approval.expires_at) > Date.now()
+        const current = active && mission.orchestration?.current_task === action.operation
+        const waiting = current && action.decision.outcome === 'require_approval'
+        return <li key={action.operation}>
+          <strong>{taskLabels[action.operation] || action.operation}</strong>
+          <p>{action.result ? 'Completed' : granted ? 'Approved' : actionLabels[action.decision.outcome]}</p>
+          {waiting && !granted && <button type="button" className="btn-primary" disabled={pending}
+            onClick={() => changeApproval(action, false)}>Approve fixture action</button>}
+          {current && granted && !action.result && <button type="button" className="btn-secondary" disabled={pending}
+            onClick={() => changeApproval(action, true)}>Revoke approval</button>}
+        </li>
+      })}
+    </ul>}
+    {actionError && <p className="form-error" role="alert">{actionError}</p>}
+  </Card>
 }

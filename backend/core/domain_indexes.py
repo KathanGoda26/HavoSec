@@ -19,6 +19,10 @@ def domain_index_specs():
         IndexModel([('status', 1), ('created_at', 1), ('_id', 1)], name='pending_commands'),
         IndexModel([('status', 1), ('available_at', 1), ('created_at', 1), ('_id', 1)], name='dispatch_schedule'),
     ]
+    specs['mission_execution_events'] = [
+        IndexModel([('organization_id', 1), ('mission_id', 1), ('created_at', -1), ('_id', -1)],
+                   name='org_mission_execution_history'),
+    ]
     specs['findings'].extend([
         IndexModel([('organization_id', 1), ('severity', 1), ('status', 1)], name='org_severity_status'),
         IndexModel([('organization_id', 1), ('asset_id', 1)], name='org_asset'),

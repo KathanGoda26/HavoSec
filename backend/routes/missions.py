@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends, Header, Query
 
 from core.database import get_database
 from core.domain_api import domain_operation, domain_scope
-from models.missions import MissionCreate, MissionPage, MissionResponse, MissionStatus
+from mission_orchestration.governance import FixtureGateway, execution_view
+from mission_orchestration.plan import MissionRef
+from models.missions import FixtureApprovalRequest, MissionCreate, MissionPage, MissionResponse, MissionStatus
 from repositories.missions import MissionRepository
 from routes.assets import asset_service
 from routes.projects import manage_projects, project_service
@@ -48,3 +50,35 @@ async def get_mission(mission_id: str, scope=Depends(domain_scope), service=Depe
 @router.post('/{mission_id}/cancel', response_model=MissionResponse, dependencies=[Depends(manage_projects)])
 async def cancel_mission(mission_id: str, scope=Depends(domain_scope), service=Depends(mission_service)):
     return await domain_operation(service.cancel(scope, mission_id))
+
+
+@router.get('/{mission_id}/actions', dependencies=[Depends(manage_projects)])
+async def get_mission_actions(mission_id: str, scope=Depends(domain_scope), service=Depends(mission_service)):
+    mission = await domain_operation(service.get_document(scope, mission_id))
+    return execution_view(list(mission.get('fixture_actions', {}).values()))
+
+
+@router.post('/{mission_id}/actions/{task_id}/approve')
+async def approve_mission_action(
+    mission_id: str, task_id: str, payload: FixtureApprovalRequest,
+    user=Depends(manage_projects), scope=Depends(domain_scope), service=Depends(mission_service),
+    db=Depends(get_database),
+):
+    mission = await domain_operation(service.get_document(scope, mission_id))
+    ref = MissionRef(scope.organization_id, str(mission['_id']))
+    approval = await domain_operation(FixtureGateway(db).change_approval(ref, task_id, user['id'], payload.action_digest))
+    return execution_view(approval)
+
+
+@router.post('/{mission_id}/actions/{task_id}/approvals/{approval_id}/revoke')
+async def revoke_mission_action_approval(
+    mission_id: str, task_id: str, approval_id: str, payload: FixtureApprovalRequest,
+    user=Depends(manage_projects), scope=Depends(domain_scope), service=Depends(mission_service),
+    db=Depends(get_database),
+):
+    mission = await domain_operation(service.get_document(scope, mission_id))
+    ref = MissionRef(scope.organization_id, str(mission['_id']))
+    approval = await domain_operation(
+        FixtureGateway(db).change_approval(ref, task_id, user['id'], payload.action_digest, revoke_id=approval_id)
+    )
+    return execution_view(approval)

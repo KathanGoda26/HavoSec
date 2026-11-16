@@ -15,6 +15,7 @@ def utc_now():
 
 class OrchestrationStore:
     def __init__(self, db):
+        self.db = db
         self.missions = db.missions
         self.outbox = db.mission_outbox
 
@@ -63,15 +64,15 @@ class OrchestrationStore:
                 return self.state(current)
             if current_version != event.version - 1:
                 raise ValueError('Mission progress event is out of sequence')
-            if current['status'] not in {'queued', 'running'} or (
+            if current['status'] not in {'queued', 'running', 'awaiting_approval'} or (
                 progress.get('workflow_id', event.mission.workflow_id) != event.mission.workflow_id
             ):
                 raise ValueError('Mission does not belong to this workflow')
-            if event.status not in {'running', *TERMINAL_STATUSES} and (
+            if event.status not in {'running', 'awaiting_approval', *TERMINAL_STATUSES} and (
                 event.status != 'queued' or event.version != 1 or current['status'] != 'queued'
             ):
                 raise ValueError('Invalid mission progress transition')
-            if event.status == 'running' and not progress.get('slot'):
+            if event.status in {'running', 'awaiting_approval'} and not progress.get('slot'):
                 raise ValueError('Mission does not hold an organization slot')
 
             status = event.status

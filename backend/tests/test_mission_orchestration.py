@@ -5,11 +5,15 @@ from uuid import uuid4
 
 import pytest
 from bson import ObjectId
+from fastapi import HTTPException
 
 from core.database import DatabaseSettings, create_database_client
 from core.domain_indexes import ensure_domain_indexes
 from core.ownership import OrganizationScope
-from mission_orchestration.plan import ASSESSMENT_V1, MissionRef, ProgressEvent, TaskResult, validate_plan
+from mission_orchestration.governance import ATTEMPT_BUSY, POLICY_DENIED, FixtureGateway, FixtureRejected
+from mission_orchestration.plan import (
+    APPROVAL_REQUIRED, ASSESSMENT_V1, FixtureAttempt, MissionRef, ProgressEvent, TaskResult, validate_plan,
+)
 from mission_orchestration.storage import OrchestrationStore, utc_now
 from repositories.missions import MissionRepository
 
@@ -27,10 +31,19 @@ def test_plan_orders_dependencies_and_rejects_cycles_or_inputs_outside_scope():
 
 async def seed_mission(db, organization_id):
     mission = MissionRef(organization_id, str(ObjectId()))
+    project_id, asset_id, user_id = ObjectId(), ObjectId(), ObjectId()
+    await db.client_companies.update_one(
+        {'_id': ObjectId(organization_id)}, {'$setOnInsert': {'status': 'active'}}, upsert=True)
+    await db.users.insert_one({'_id': user_id, 'organizationId': organization_id, 'role': 'admin'})
+    await db.projects.insert_one({'_id': project_id, 'organization_id': organization_id, 'status': 'active'})
+    await db.assets.insert_one({'_id': asset_id, 'organization_id': organization_id, 'status': 'active',
+                                'project_id': str(project_id), 'type': 'repository', 'target': 'fixture://test'})
     now = utc_now()
     await db.missions.insert_one({
         '_id': ObjectId(mission.mission_id), 'organization_id': organization_id,
         'request_key': uuid4().hex, 'status': 'queued', 'created_at': now, 'updated_at': now,
+        'mission_type': 'repository_assessment', 'requested_by': str(user_id),
+        'project_id': str(project_id), 'asset_id': str(asset_id),
     })
     await db.mission_outbox.insert_one({
         '_id': ObjectId(mission.mission_id), 'organization_id': organization_id,
@@ -99,6 +112,76 @@ def test_mongo_retries_projection_slot_and_cancellation():
     asyncio.run(with_test_database(check))
 
 
+def test_fixture_gateway_policy_approval_and_retry():
+    from datetime import timedelta
+
+    async def check(db, store):
+        organization = str(ObjectId())
+        mission = await seed_mission(db, organization)
+        identity = store.mission_query(mission)
+        await db.client_companies.update_one({'_id': ObjectId(organization)}, {
+            '$set': {'mission_policy.fixture': 'require_approval'},
+        })
+        actor = (await store.get_mission(mission))['requested_by']
+        await store.project(ProgressEvent(mission, 1, 'queued', 3))
+        await store.acquire_slot(mission)
+        await store.project(ProgressEvent(mission, 2, 'running', 3, 'prepare'))
+        gateway = FixtureGateway(db)
+        request = FixtureAttempt(mission, 'prepare')
+        foreign = FixtureAttempt(MissionRef(str(ObjectId()), mission.mission_id), 'prepare')
+        with pytest.raises(FixtureRejected, match=POLICY_DENIED):
+            await gateway.begin(foreign, 'foreign', 1)
+        with pytest.raises(FixtureRejected, match=APPROVAL_REQUIRED):
+            await gateway.begin(request, 'pending', 1)
+        await store.project(ProgressEvent(mission, 3, 'awaiting_approval', 3, 'prepare'))
+        action = (await store.get_mission(mission))['fixture_actions']['prepare']
+        assert action['attempts'] == []
+        digest = action['digest']
+        with pytest.raises(HTTPException) as altered:
+            await gateway.change_approval(mission, 'prepare', actor, '0' * 64)
+        assert altered.value.status_code == 409
+        granted = await gateway.change_approval(mission, 'prepare', actor, digest)
+        await gateway.change_approval(mission, 'prepare', actor, digest, revoke_id=granted['id'])
+        with pytest.raises(FixtureRejected, match=APPROVAL_REQUIRED):
+            await gateway.begin(request, 'revoked', 1)
+        await gateway.change_approval(mission, 'prepare', actor, digest)
+        await db.missions.update_one(identity, {'$set': {
+            'fixture_actions.prepare.approval.expires_at': utc_now() - timedelta(seconds=1),
+        }})
+        with pytest.raises(FixtureRejected, match=APPROVAL_REQUIRED):
+            await gateway.begin(request, 'expired', 1)
+        granted = await gateway.change_approval(mission, 'prepare', actor, digest)
+        await db.users.update_one({'_id': ObjectId(actor)}, {'$set': {'role': 'user'}})
+        with pytest.raises(FixtureRejected, match=POLICY_DENIED):
+            await gateway.begin(request, 'membership_changed', 1)
+        await db.users.update_one({'_id': ObjectId(actor)}, {'$set': {'role': 'admin'}})
+        assert await gateway.begin(request, 'first', 1) is None
+        with pytest.raises(FixtureRejected, match=ATTEMPT_BUSY):
+            await gateway.begin(request, 'contender', 2)
+        await gateway.finish(request, 'first', 'failed')
+        assert await gateway.begin(request, 'retry', 2) is None
+        result = TaskResult('prepare', 'fixture_scope', 2, 'retry')
+        await gateway.finish(request, 'retry', 'completed', result)
+        assert await gateway.begin(request, 'replay', 3) == result
+        action = (await store.get_mission(mission))['fixture_actions']['prepare']
+        assert action['approval']['id'] == granted['id']
+        assert action['approval']['consumed_for'] == digest
+        assert [attempt['state'] for attempt in action['attempts']] == ['failed', 'completed']
+        assert await db.mission_execution_events.count_documents({
+            'organization_id': organization, 'mission_id': mission.mission_id, 'type': 'approval_revoked',
+        }) == 1
+
+        await store.project(ProgressEvent(mission, 4, 'running', 3, 'assess', [result]))
+        asset_id = (await store.get_mission(mission))['asset_id']
+        await db.assets.update_one({'_id': ObjectId(asset_id)}, {'$set': {'target': 'fixture://changed'}})
+        with pytest.raises(FixtureRejected, match=POLICY_DENIED):
+            await gateway.begin(FixtureAttempt(mission, 'assess'), 'changed_target', 1)
+        action = (await store.get_mission(mission))['fixture_actions']['assess']
+        assert action['decision']['reason'] == 'target_changed' and action['attempts'] == []
+
+    asyncio.run(with_test_database(check))
+
+
 def test_temporal_dispatch_restart_activity_retry_and_cancellation():
     address = os.environ.get('MISSION_TEST_TEMPORAL_ADDRESS')
     if not address:
@@ -111,7 +194,6 @@ def test_temporal_dispatch_restart_activity_retry_and_cancellation():
 
     from mission_orchestration.activities import MissionActivities
     from mission_orchestration.dispatcher import MissionDispatcher
-    from mission_orchestration.plan import FixtureAttempt, TaskResult
     from mission_orchestration.workflow import RepositoryAssessment
 
     async def check(db, store):
@@ -139,36 +221,47 @@ def test_temporal_dispatch_restart_activity_retry_and_cancellation():
         cancelled = await seed_mission(db, organization)
         failed = await seed_mission(db, organization)
         attempts = []
-        activities = MissionActivities(store)
+        class TestActivities(MissionActivities):
+            async def execute_fixture(self, request, task, attempt, attempt_id):
+                if request.mission == recovered and task.id == 'assess' and attempt == 1:
+                    interrupted.set()
+                    raise ApplicationError('fixture failed on its first attempt')
+                if request.mission == cancelled:
+                    assert task.id == 'prepare'
+                    started_for_cancellation.set()
+                    while True:
+                        activity.heartbeat()
+                        await asyncio.sleep(0.2)
+                if request.mission == failed:
+                    attempts.append(attempt)
+                    raise ApplicationError('fixture fails on every attempt')
+                return await super().execute_fixture(request, task, attempt, attempt_id)
 
-        @activity.defn(name='run_mission_fixture')
-        async def inject_failure(request: FixtureAttempt) -> TaskResult:
-            attempt = activity.info().attempt
-            if request.mission == recovered and request.task_id == 'assess' and attempt == 1:
-                interrupted.set()
-                raise ApplicationError('fixture failed on its first attempt')
-            if request.mission == cancelled:
-                assert request.task_id == 'prepare'
-                started_for_cancellation.set()
-                while True:
-                    activity.heartbeat()
-                    await asyncio.sleep(0.2)
-            if request.mission == failed:
-                attempts.append(attempt)
-                raise ApplicationError('fixture fails on every attempt')
-            return await activities.run_mission_fixture(request)
+        activities = TestActivities(store)
 
         def worker():
             return Worker(client, task_queue=queue, workflows=[RepositoryAssessment], activities=[
-                activities.acquire_mission_slot, activities.project_mission_progress, inject_failure,
+                activities.acquire_mission_slot, activities.project_mission_progress, activities.run_mission_fixture,
             ])
+
+        async def wait_for_action(mission, task_id, predicate):
+            async with asyncio.timeout(30):
+                while True:
+                    document = await store.get_mission(mission)
+                    action = document.get('fixture_actions', {}).get(task_id)
+                    if action and predicate(document, action):
+                        return document, action
+                    await asyncio.sleep(0.1)
 
         async with worker():
             await asyncio.wait_for(interrupted.wait(), timeout=25)
+            await wait_for_action(recovered, 'assess', lambda _, action: action['attempts'][0]['state'] == 'failed')
         async with worker():
             assert await asyncio.wait_for(handle.result(), timeout=30) == 'completed'
             progress = (await store.get_mission(recovered))['orchestration']
             assert [task['attempt'] for task in progress['completed']] == [1, 2, 1]
+            action = (await store.get_mission(recovered))['fixture_actions']['assess']
+            assert [attempt['state'] for attempt in action['attempts']] == ['failed', 'completed']
             assert await dispatcher.dispatch_one()
             assert await dispatcher.dispatch_one()
             await asyncio.wait_for(started_for_cancellation.wait(), timeout=25)
@@ -177,9 +270,30 @@ def test_temporal_dispatch_restart_activity_retry_and_cancellation():
             assert await dispatcher.dispatch_one()
             assert await asyncio.wait_for(
                 client.get_workflow_handle(cancelled.workflow_id).result(), timeout=25) == 'cancelled'
-            assert (await store.get_mission(cancelled))['orchestration']['completed'] == []
+            cancelled_record = await store.get_mission(cancelled)
+            assert cancelled_record['orchestration']['completed'] == []
+            assert cancelled_record['fixture_actions']['prepare']['attempts'][0]['state'] == 'interrupted'
             assert await asyncio.wait_for(
                 client.get_workflow_handle(failed.workflow_id).result(), timeout=40) == 'failed'
             assert attempts == [1, 2, 3]
+
+            approval_org = str(ObjectId())
+            governed = await seed_mission(db, approval_org)
+            await db.client_companies.update_one({'_id': ObjectId(approval_org)}, {
+                '$set': {'mission_policy.fixture': 'require_approval'},
+            })
+            assert await dispatcher.dispatch_one()
+            gateway = FixtureGateway(db)
+            for task in ASSESSMENT_V1:
+                document, action = await wait_for_action(
+                    governed, task.id, lambda doc, entry: doc['status'] == 'awaiting_approval'
+                    and doc['orchestration']['current_task'] == task.id and not entry['attempts'],
+                )
+                await gateway.change_approval(governed, task.id, document['requested_by'], action['digest'])
+            assert await asyncio.wait_for(
+                client.get_workflow_handle(governed.workflow_id).result(), timeout=25) == 'completed'
+            governed_actions = (await store.get_mission(governed))['fixture_actions']
+            assert all(len(action['attempts']) == 1 and action['approval']['consumed_for'] == action['digest']
+                       for action in governed_actions.values())
 
     asyncio.run(with_test_database(check))

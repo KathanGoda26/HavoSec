@@ -6,6 +6,7 @@ from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from repositories.project_resources import ProjectResourceRepository
+from mission_orchestration.governance import asset_scope_digest
 from mission_orchestration.plan import TERMINAL_STATUSES
 
 
@@ -36,9 +37,10 @@ class MissionRepository(ProjectResourceRepository):
             )
             if asset is None:
                 raise HTTPException(409, 'Repository asset changed; refresh and retry')
-            await self.collection.insert_one(mission, session=session)
+            scoped_mission = {**mission, 'fixture_scope_digest': asset_scope_digest(asset)}
+            await self.collection.insert_one(scoped_mission, session=session)
             await self.db.mission_outbox.insert_one(command, session=session)
-            return mission
+            return scoped_mission
 
         try:
             async with await self.db.client.start_session() as session:

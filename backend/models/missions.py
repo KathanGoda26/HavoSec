@@ -57,3 +57,9 @@ class MissionPage(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class FixtureApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    action_digest: str = Field(pattern=r'^[0-9a-f]{64}$')

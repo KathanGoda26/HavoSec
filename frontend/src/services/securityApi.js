@@ -14,6 +14,13 @@ export const securityApi = {
   listMissions: params => apiClient.get('/missions', { params }).then(page),
   getMission: (id, params) => apiClient.get(`/missions/${id}`, { params }).then(page),
   cancelMission: (id, params) => apiClient.post(`/missions/${id}/cancel`, null, { params }).then(page),
+  listMissionActions: (id, params) => apiClient.get(`/missions/${id}/actions`, { params }).then(page),
+  approveMissionAction: (id, taskId, actionDigest, params) => apiClient.post(
+    `/missions/${id}/actions/${taskId}/approve`, { action_digest: actionDigest }, { params },
+  ).then(page),
+  revokeMissionApproval: (id, taskId, approvalId, actionDigest, params) => apiClient.post(
+    `/missions/${id}/actions/${taskId}/approvals/${approvalId}/revoke`, { action_digest: actionDigest }, { params },
+  ).then(page),
   createMission: (payload, requestKey, params) => apiClient.post('/missions', payload, {
     params,
     headers: { 'Idempotency-Key': requestKey },

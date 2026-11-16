@@ -46,6 +46,8 @@ def test_outbox_failure_rolls_back_mission():
     assert response.status_code == 503
     assert not db.missions.documents
     assert not db.mission_outbox.documents
+    db.mission_outbox.fail_insert = False
+    assert submit(app, payload).status_code == 201
 
 
 def test_fixture_report_is_scoped_and_pins_the_operator_commit(monkeypatch):
@@ -64,5 +66,3 @@ def test_fixture_report_is_scoped_and_pins_the_operator_commit(monkeypatch):
     assert request(app, 'GET', path).json()['commit_sha'] == commit
     identity['organizationId'] = ORG_B
     assert request(app, 'GET', path).status_code == 404
-    db.mission_outbox.fail_insert = False
-    assert submit(app, payload).status_code == 201

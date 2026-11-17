@@ -29,16 +29,24 @@ class InstallationToken:
 
 
 class GitHubAppClient:
-    def __init__(self, settings: GitHubAppSettings, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(self, settings: GitHubAppSettings, transport: httpx.AsyncBaseTransport | None = None,
+                 *, publication_repository_id: int | None = None):
         if settings.installation_id is None:
             raise GitHubConfigurationError("GITHUB_INSTALLATION_ID is required")
         self.settings = settings
         self.transport = transport
+        self.publication_repository_id = publication_repository_id
 
     async def create_installation_token(self, *, read_repository_id: int | None = None) -> InstallationToken:
         scope = None if read_repository_id is None else {
             'repository_ids': [read_repository_id], 'permissions': {'contents': 'read'},
         }
+        if self.publication_repository_id is not None:
+            if read_repository_id is not None and read_repository_id != self.publication_repository_id:
+                raise GitHubConfigurationError('Repository is outside the publication client scope')
+            if read_repository_id is None:
+                scope = {'repository_ids': [self.publication_repository_id],
+                         'permissions': {'contents': 'write', 'pull_requests': 'write'}}
         payload = await self._request(
             "POST",
             f"/app/installations/{self.settings.installation_id}/access_tokens",
@@ -156,10 +164,13 @@ class GitHubAppClient:
         )
         return _sha(payload, "blob")
 
-    async def create_tree(self, repository: str, base_tree: str, entries: list[dict]) -> str:
+    async def create_tree(self, repository: str, base_tree: str | None, entries: list[dict]) -> str:
+        body = {"tree": entries}
+        if base_tree is not None:
+            body["base_tree"] = base_tree
         payload = await self._installation_request(
             "POST", f"/repos/{_repository_path(repository)}/git/trees",
-            json={"base_tree": base_tree, "tree": entries},
+            json=body,
         )
         return _sha(payload, "tree")
 

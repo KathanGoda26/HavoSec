@@ -51,6 +51,11 @@ function DefenseMetrics() {
     setMutation({ id: item.id, action, error: '' })
     try {
       if (action === 'verify') await securityApi.verifyRemediation(item.id)
+      else if (action === 'approved') await securityApi.updateRemediation(item.id, {
+        status: action,
+        approval_patch_sha256: item.verified_patch_sha256,
+        approval_source_commit: item.verified_source_commit,
+      })
       else await securityApi.updateRemediation(item.id, { status: action })
       reload()
     } catch (requestError) {
@@ -89,7 +94,7 @@ function DefenseMetrics() {
             <div className="patch-actions">
               <Link to={findingsPath} className="btn-secondary">View Finding</Link>
               {canManage && !active && item.verification_status !== 'verified' && <button type="button" className="btn-primary" disabled={Boolean(busy)} onClick={() => act(item, 'verify')}>{busy === 'verify' ? 'Queueing…' : proposal ? 'Verify Fix' : 'Generate & Verify'}</button>}
-              {canManage && item.status === 'awaiting_approval' && item.verification_status === 'verified' && <button type="button" className="btn-primary" disabled={Boolean(busy)} onClick={() => act(item, 'approved')}>{busy === 'approved' ? 'Approving…' : 'Approve'}</button>}
+              {canManage && item.status === 'awaiting_approval' && item.verification_status === 'verified' && <button type="button" className="btn-primary" disabled={Boolean(busy) || !item.verified_patch_sha256 || !item.verified_source_commit} onClick={() => act(item, 'approved')}>{busy === 'approved' ? 'Approving…' : 'Approve Verified Patch'}</button>}
               {canManage && ['pending', 'awaiting_approval'].includes(item.status) && <button type="button" className="btn-secondary" disabled={Boolean(busy)} onClick={() => act(item, 'rejected')}>{busy === 'rejected' ? 'Rejecting…' : 'Reject'}</button>}
               <button type="button" className="btn-secondary" aria-expanded={expandedId === item.id} aria-controls={`${item.id}-review`} onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}>{expandedId === item.id ? 'Close Review' : 'Review Details'}</button>
             </div>

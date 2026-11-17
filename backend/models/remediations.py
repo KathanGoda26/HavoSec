@@ -81,6 +81,8 @@ class RemediationUpdate(BaseModel):
     recommendation: str | None = Field(default=None, max_length=16000)
     proposed_fix: str | None = Field(default=None, max_length=32000)
     status: RemediationStatus | None = None
+    approval_patch_sha256: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
+    approval_source_commit: str | None = Field(default=None, pattern=r'^[a-f0-9]{40}$')
 
     @model_validator(mode='after')
     def nonempty(self):

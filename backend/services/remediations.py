@@ -84,12 +84,16 @@ class RemediationService(ProjectResourceService):
         document = await self.get_document(scope, resource_id)
         await self.active_project(scope, document['project_id'])
         changes = payload.model_dump(exclude_unset=True, mode='json')
+        requested_patch = changes.pop('approval_patch_sha256', None)
+        requested_source = changes.pop('approval_source_commit', None)
         old, new = document['status'], changes.get('status', document['status'])
+        if (requested_patch or requested_source) and changes.get('status') != 'approved':
+            raise HTTPException(422, 'Patch and commit confirmation may only accompany approval')
         if new != old and new not in TRANSITIONS[old]:
             raise HTTPException(409, 'Invalid remediation status transition')
         if new == 'approved' and new != old:
             try:
-                assert_verified_patch(document)
+                digest = assert_verified_patch(document)
             except PatchIntegrityError as exc:
                 raise HTTPException(409, str(exc)) from exc
             if document.get('verification_status') != 'verified':
@@ -100,17 +104,25 @@ class RemediationService(ProjectResourceService):
             if ((finding.get('source_metadata') or {}).get('commit_sha') !=
                     document.get('verified_source_commit')):
                 raise HTTPException(409, 'Finding source revision changed after verification')
+            if requested_patch != digest or requested_source != document.get('verified_source_commit'):
+                raise HTTPException(409, 'Review the current verified patch and commit before approving')
+            changes['publication_approval'] = {'patch_sha256': digest, 'source_commit': requested_source,
+                                               'actor_id': actor_id}
         editing = any(key in changes for key in ['summary', 'recommendation', 'proposed_fix'])
         if editing and (new in {'approved', 'rejected', 'resolved'} or
                         (old in {'awaiting_approval', 'approved', 'rejected', 'resolved'} and new != 'pending')):
             raise HTTPException(409, 'Return proposal to pending before editing it')
-        if all(document[key] == value for key, value in changes.items()):
+        if all(document.get(key) == value for key, value in changes.items()):
             return document_view(document)
         if new != old:
             changes['approved_by'] = actor_id if new == 'approved' else (document['approved_by'] if new == 'resolved' else None)
+            if new not in {'approved', 'resolved'}:
+                changes['publication_approval'] = None
         changes['updated_at'] = datetime.now(timezone.utc)
         event = activity_event({**document, **changes}, actor_id, ActivityType.REMEDIATION_UPDATED, 'remediation')
         event['metadata'] = {'previous_status': old, 'status': new}
+        if new == 'approved' and new != old:
+            event['metadata'].update(changes['publication_approval'])
         return document_view(await self.repository.update_with_activity(scope, document, changes, event))
 
     async def queue_verification(self, scope, resource_id, actor_id):

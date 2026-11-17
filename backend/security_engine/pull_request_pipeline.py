@@ -4,13 +4,22 @@ import base64
 from datetime import timezone
 from pathlib import Path, PurePosixPath
 
-from integrations.github.client import GitHubAPIError, GitHubAppClient
+from integrations.github.client import GitHubAPIError
 from models.remediations import RemediationProposal
 from security_engine.executor import ExecutionError
 from security_engine.patch_integrity import (PatchIntegrityError, assert_patch_secret_safe,
                                              assert_verified_patch)
 from security_engine.remediation import PatchSafetyError, safe_relative_path
 from security_engine.storage import RunChanged
+
+
+class DeliveryUncertain(RuntimeError):
+    pass
+
+
+def _may_have_written(error):
+    status = error.status_code
+    return status is None or status in (408, 409, 422) or status >= 500
 
 
 class PullRequestPipeline:
@@ -26,6 +35,8 @@ class PullRequestPipeline:
             return await self._process(record)
         except RunChanged:
             return 'cancelled_or_changed'
+        except DeliveryUncertain:
+            await self.storage.fail_pull_request(record, 'GitHub did not confirm publication. Review the branch and pull request before retrying.')
         except (ValueError, PatchIntegrityError, PatchSafetyError):
             await self.storage.fail_pull_request(record, 'Stored remediation integrity validation failed')
         except (GitHubAPIError, ExecutionError):
@@ -39,7 +50,7 @@ class PullRequestPipeline:
         assert_verified_patch(remediation)
         assert_patch_secret_safe(remediation)
         proposal = RemediationProposal.model_validate(remediation['proposal'])
-        client = self.client_factory(integration['installation_id'])
+        client = self.client_factory(integration['installation_id'], record['repository_id'])
         name, base, expected = record['repository_full_name'], record['base_branch'], record['expected_source_commit']
         if await client.get_branch_head(name, base) != expected:
             raise ValueError('Repository source changed after PR operation was queued')
@@ -70,6 +81,7 @@ class PullRequestPipeline:
             changed = _changed_files(workspace.paths.original, workspace.paths.patched)
             if set(changed) != set(safe_patch.files) or set(changed) != set(remediation['verified_affected_files']):
                 raise PatchIntegrityError('Actual changed files do not match the verified patch')
+            await self.recheck_publication(record, client)
             tree_entries = []
             for relative in changed:
                 content = workspace.paths.patched.joinpath(*PurePosixPath(relative).parts).read_bytes()
@@ -86,29 +98,46 @@ class PullRequestPipeline:
         )
         branch_head = await _branch_head_or_none(client, name, record['branch'])
         if branch_head is None:
+            await self.recheck_publication(record, client)
             try:
                 await client.create_branch(name, record['branch'], commit_sha)
             except GitHubAPIError as exc:
-                if exc.status_code != 422 or await client.get_branch_head(name, record['branch']) != commit_sha:
+                if not _may_have_written(exc):
                     raise
+                try:
+                    observed = await _branch_head_or_none(client, name, record['branch'])
+                except GitHubAPIError as lookup_error:
+                    raise DeliveryUncertain from lookup_error
+                if observed != commit_sha:
+                    raise DeliveryUncertain from exc
         elif branch_head != commit_sha:
             raise ValueError('Deterministic HavoSec branch already points to unexpected content')
 
         owner = name.split('/', 1)[0]
         pull_request = await client.find_pull_request(name, owner, record['branch'], base)
         if pull_request is None:
+            await self.recheck_publication(record, client)
             title = _title(finding.get('title'))
             body = _body(record, remediation, finding)
             try:
                 pull_request = await client.create_pull_request(name, title, body, record['branch'], base)
             except GitHubAPIError as exc:
-                if exc.status_code != 422:
+                if not _may_have_written(exc):
                     raise
-                pull_request = await client.find_pull_request(name, owner, record['branch'], base)
+                try:
+                    pull_request = await client.find_pull_request(name, owner, record['branch'], base)
+                except GitHubAPIError as lookup_error:
+                    raise DeliveryUncertain from lookup_error
                 if pull_request is None:
-                    raise
+                    raise DeliveryUncertain from exc
         await self.storage.complete_pull_request(record, commit_sha, pull_request)
         return 'open'
+
+    async def recheck_publication(self, record, client):
+        await self.storage.renew_pull_request_claim(record)
+        await self.storage.load_pull_request_context(record)
+        if await client.get_branch_head(record['repository_full_name'], record['base_branch']) != record['expected_source_commit']:
+            raise ValueError('Repository source changed before publication')
 
 
 async def _branch_head_or_none(client, repository, branch):

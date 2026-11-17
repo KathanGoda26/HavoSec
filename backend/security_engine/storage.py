@@ -209,6 +209,14 @@ class WorkerRepository:
             raise ValueError('Pull request project authorization changed')
         return remediation, finding, asset, integration, repository
 
+    async def renew_pull_request_claim(self, record):
+        now = datetime.now(timezone.utc)
+        result = await self.db.pull_requests.update_one(
+            {**self.owned_pull_request(record), 'claim_expires_at': {'$gt': now}},
+            {'$set': {'claim_expires_at': now + timedelta(seconds=self.lease_seconds)}})
+        if not result.matched_count:
+            raise RunChanged('Pull request operation is no longer owned by this worker')
+
     async def complete_pull_request(self, record, commit_sha, pull_request):
         now = datetime.now(timezone.utc)
         async def save(session):

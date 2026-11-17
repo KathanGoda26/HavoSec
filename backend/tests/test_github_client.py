@@ -96,3 +96,18 @@ def test_assessment_archive_uses_one_repository_read_token(tmp_path):
     asyncio.run(client.download_readonly_archive('example/pilot', 71, 'a' * 40, archive, 1024))
     assert archive.read_bytes() == b'pinned archive'
     assert [request.method for request in requests] == ['POST', 'GET', 'GET']
+
+
+def test_publication_installation_token_is_repository_scoped(tmp_path):
+    key_path = tmp_path / 'app.pem'
+    make_private_key(key_path)
+
+    def handler(request):
+        assert json.loads(request.content) == {
+            'repository_ids': [71], 'permissions': {'contents': 'write', 'pull_requests': 'write'},
+        }
+        return httpx.Response(201, json={'token': 'test-token', 'expires_at': '2026-11-18T01:00:00Z'})
+
+    client = GitHubAppClient(GitHubAppSettings(42, key_path, 19), httpx.MockTransport(handler),
+                             publication_repository_id=71)
+    asyncio.run(client.create_installation_token())

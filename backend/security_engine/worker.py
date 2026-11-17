@@ -46,8 +46,8 @@ async def run_worker():
         github_settings = GitHubAppSettings.from_environment()
         pull_request_pipeline = PullRequestPipeline(
             storage,
-            lambda installation_id: GitHubAppClient(replace(
-                github_settings, installation_id=installation_id)),
+            lambda installation_id, repository_id: GitHubAppClient(replace(
+                github_settings, installation_id=installation_id), publication_repository_id=repository_id),
             PatchApplicator(settings.max_output_bytes),
             partial(RemediationWorkspace, parent=settings.workspace_root,
                     keep=settings.keep_workspaces, max_bytes=settings.remediation_workspace_limit),

@@ -220,6 +220,32 @@ def test_stale_proposal_cannot_be_approved(monkeypatch):
     assert db.remediations.documents[0]['approved_by'] is None
 
 
+def test_approval_requires_the_digest_and_commit_the_reviewer_saw():
+    from security_engine.patch_integrity import patch_sha256
+
+    app, db, _, _, _, remediation_id = setup()
+    diff = '--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-eval("1 + 1")\n+2\n'
+    commit = 'a' * 40
+    digest = patch_sha256(diff)
+    db.findings.documents[0]['source_metadata'] = {'commit_sha': commit}
+    db.remediations.documents[0].update(
+        status='awaiting_approval', source_commit=commit, verification_status='verified',
+        verified_source_commit=commit, verified_patch_sha256=digest,
+        verified_patch=diff, verified_affected_files=['app.py'],
+        proposal={'patch': diff, 'affected_files': ['app.py'], 'summary': 'Replace eval',
+                  'explanation': 'Use a constant.', 'expected_security_effect': 'Removes eval.',
+                  'potential_side_effects': [], 'recommended_tests': [], 'confidence': 1},
+    )
+    assert patch(app, remediation_id, status='approved', approval_patch_sha256='0' * 64,
+                 approval_source_commit=commit).status_code == 409
+    assert patch(app, remediation_id, status='approved', approval_patch_sha256=digest,
+                 approval_source_commit='b' * 40).status_code == 409
+    approved = patch(app, remediation_id, status='approved', approval_patch_sha256=digest,
+                     approval_source_commit=commit)
+    assert approved.status_code == 200, approved.text
+    assert db.remediations.documents[0]['publication_approval']['patch_sha256'] == digest
+
+
 def test_admin_can_queue_one_bounded_asynchronous_verification_attempt():
     app, db, _, _, _, remediation_id = setup()
     remediation = db.remediations.documents[0]

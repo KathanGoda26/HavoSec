@@ -31,10 +31,12 @@ const statusLabels = {
 }
 const actionLabels = { allow: 'Allowed', deny: 'Denied', require_approval: 'Awaiting approval' }
 const fixtureScan = 'fixture_repository_assessment'
+const fixtureRemediation = 'fixture_remediation_verification'
 const githubScan = 'github_repository_assessment'
 const missionTitles = {
   repository_assessment: 'Simulated assessment',
   [fixtureScan]: 'Semgrep fixture assessment',
+  [fixtureRemediation]: 'Fixture patch verification',
   [githubScan]: 'GitHub repository assessment',
 }
 const scanGaps = {
@@ -292,15 +294,46 @@ function MissionRecord({ missionId, organizationId }) {
       {cancelError && <p className="form-error" role="alert">{cancelError}</p>}
       <button type="button" className="btn-secondary" onClick={reload}>Refresh status</button>
     </Card>}
-    {[fixtureScan, githubScan].includes(mission?.mission_type) && progress?.completed.some(task => task.task_id === 'assess') &&
+    {[fixtureScan, fixtureRemediation, githubScan].includes(mission?.mission_type) &&
+      progress?.completed.some(task => task.task_id === 'assess') &&
       <MissionReport missionId={missionId} organizationId={organizationId} />}
+    {mission?.mission_type === fixtureRemediation && progress?.completed.some(task => task.task_id === 'summarize') &&
+      <MissionVerification missionId={missionId} organizationId={organizationId} />}
     {canManage && mission && <MissionActions mission={mission} organizationId={organizationId} onChange={reload} />}
   </div>
 }
 
 function missionTaskLabel(mission, task) {
+  if (mission.mission_type === fixtureRemediation && task === 'summarize') return 'Verify proposed patch'
   if (mission.mission_type === githubScan && task === 'assess') return 'Scan pinned repository'
   return taskLabels[task] || task
+}
+
+function MissionVerification({ missionId, organizationId }) {
+  const { data: report, loading, error, reload } = usePollingResource(
+    () => securityApi.getMissionVerification(missionId, organizationParams(organizationId)), [missionId, organizationId],
+  )
+  const statuses = { verified: 'Verified', failed: 'Verification failed', inconclusive: 'Inconclusive' }
+  return <Card title="Patch verification">
+    <ResourceState loading={loading} error={error} onRetry={reload} noun="verification report" />
+    {!loading && !error && report && <>
+      <strong>{statuses[report.status]}</strong>
+      <p>{report.summary}</p>
+      {report.proposal && <>
+        <p>{report.proposal.summary}</p>
+        <p>{report.proposal.expected_security_effect}</p>
+        <details>
+          <summary>View proposed patch</summary>
+          <pre><code>{report.proposal.patch}</code></pre>
+          <p>Patch SHA-256 <code>{report.patch_sha256}</code></p>
+        </details>
+      </>}
+      {report.comparison && <p>Rule matches before: {report.comparison.before_finding_count}
+        {' · '}After: {report.comparison.after_finding_count}</p>}
+      {report.skipped_checks.map(item => <p key={item}>{item}</p>)}
+      {report.publication_status === 'fixture_only' && <p>Publication is disabled for fixture missions.</p>}
+    </>}
+  </Card>
 }
 
 function MissionReport({ missionId, organizationId }) {

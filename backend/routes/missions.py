@@ -55,6 +55,16 @@ async def get_mission_report(mission_id: str, scope=Depends(domain_scope), servi
     return execution_view(mission['assessment_report'])
 
 
+@router.get('/{mission_id}/remediation-verification')
+async def get_mission_remediation_verification(
+    mission_id: str, scope=Depends(domain_scope), service=Depends(mission_service),
+):
+    mission = await domain_operation(service.get_document(scope, mission_id))
+    if 'remediation_verification' not in mission:
+        raise HTTPException(404, 'Remediation verification is unavailable')
+    return execution_view(mission['remediation_verification'])
+
+
 @router.post('/{mission_id}/cancel', response_model=MissionResponse, dependencies=[Depends(manage_projects)])
 async def cancel_mission(mission_id: str, scope=Depends(domain_scope), service=Depends(mission_service)):
     return await domain_operation(service.cancel(scope, mission_id))

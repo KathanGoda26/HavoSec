@@ -14,6 +14,7 @@ export const securityApi = {
   listMissions: params => apiClient.get('/missions', { params }).then(page),
   getMission: (id, params) => apiClient.get(`/missions/${id}`, { params }).then(page),
   getMissionReport: (id, params) => apiClient.get(`/missions/${id}/report`, { params }).then(page),
+  getMissionVerification: (id, params) => apiClient.get(`/missions/${id}/remediation-verification`, { params }).then(page),
   cancelMission: (id, params) => apiClient.post(`/missions/${id}/cancel`, null, { params }).then(page),
   listMissionActions: (id, params) => apiClient.get(`/missions/${id}/actions`, { params }).then(page),
   approveMissionAction: (id, taskId, actionDigest, params) => apiClient.post(

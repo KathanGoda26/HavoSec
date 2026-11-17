@@ -11,7 +11,7 @@ from core.domain_api import document_view
 from integrations.github.client import GitHubAPIError
 from integrations.github.config import GitHubConfigurationError
 from mission_orchestration.github_scope import authorized_github_scope, resolve_github_commit
-from mission_orchestration.plan import FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION
+from mission_orchestration.plan import FIXTURE_REMEDIATION_MISSION, FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION
 from services.project_resources import ProjectResourceService
 
 
@@ -37,7 +37,7 @@ class MissionService(ProjectResourceService):
         digest = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
         existing = await self.repository.get_by_key(scope, request_key)
         if existing is None:
-            if payload.mission_type == FIXTURE_SCAN_MISSION:
+            if payload.mission_type in (FIXTURE_SCAN_MISSION, FIXTURE_REMEDIATION_MISSION):
                 commit = os.environ.get('MISSION_FIXTURE_COMMIT', '')
                 if not re.fullmatch('[0-9a-f]{40}', commit):
                     raise HTTPException(503, 'Fixture scanning is not configured')

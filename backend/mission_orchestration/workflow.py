@@ -6,8 +6,8 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
 from mission_orchestration.plan import (
-    APPROVAL_REQUIRED, ASSESSMENT_V1, CANCEL_SIGNAL, FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION, INCOMPLETE_SCAN,
-    TERMINAL_STATUSES, WORKFLOW_TYPE,
+    APPROVAL_REQUIRED, ASSESSMENT_V1, CANCEL_SIGNAL, FIXTURE_REMEDIATION_MISSION, FIXTURE_SCAN_MISSION,
+    GITHUB_SCAN_MISSION, INCOMPLETE_SCAN, TERMINAL_STATUSES, UNVERIFIED_PATCH, WORKFLOW_TYPE,
     FixtureAttempt, MissionRef, ProgressEvent,
     ProgressState, TaskResult, validate_plan,
 )
@@ -76,13 +76,16 @@ class RepositoryAssessment:
             outcome = await self.run_task(task)
             if outcome:
                 return outcome
-        return 'partial' if any(result.output == INCOMPLETE_SCAN for result in self.completed) else 'completed'
+        failures = {INCOMPLETE_SCAN, UNVERIFIED_PATCH}
+        return 'partial' if any(result.output in failures for result in self.completed) else 'completed'
 
     async def run_task(self, task):
         poll = 0
         approval_deadline = None
-        scan_deadlines = {FIXTURE_SCAN_MISSION: 75, GITHUB_SCAN_MISSION: 145}
+        scan_deadlines = {FIXTURE_SCAN_MISSION: 75, FIXTURE_REMEDIATION_MISSION: 75, GITHUB_SCAN_MISSION: 145}
         deadline = scan_deadlines.get(self.mission.mission_type, task.deadline_seconds) if task.id == 'assess' else task.deadline_seconds
+        if self.mission.mission_type == FIXTURE_REMEDIATION_MISSION and task.id == 'summarize':
+            deadline = 145
         while not self.cancel_requested:
             self.active_task = workflow.start_activity(
                 'run_mission_fixture', FixtureAttempt(self.mission, task.id), result_type=TaskResult,

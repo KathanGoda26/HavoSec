@@ -49,3 +49,7 @@ The API and worker use the configured GitHub App to mint installation tokens res
 The GitHub Actions pilot downloads the pinned public Tile_Studio revision anonymously using the same archive reader. Its temporary MongoDB contains only synthetic organization and installation records. A separate test verifies token request scope and that the archive redirect receives no authorization header. The public pilot does not validate any live installation credentials.
 
 For the authenticated Tile_Studio smoke check, run `bash backend/run_github_mission_smoke.sh` from the HavoSec checkout in Linux or WSL with Python 3.12+, Docker, and the existing GitHub App settings in `backend/.env`. The script starts disposable MongoDB and Temporal containers on ports 27249 and 7239. It queues and approves a mission through the API, fetches the pinned checkout with the live App, and reads the report through the API. The key stays on the machine; the GitHub Actions pilot continues to use anonymous archive access.
+
+## Verify the bundled patch
+
+Choose **Fixture patch verification** in Mission Control with the same configuration as the Semgrep fixture assessment. The worker finds the known Python `eval` match, reloads the fixture and bundled diff from the pinned commit, and scans separate original and patched copies with the same rules. The verification report shows the proposed change, patch digest, before and after counts, and checks that were skipped. The fixture's approval policy governs the verification steps. Publishing changes from a fixture mission is disabled.

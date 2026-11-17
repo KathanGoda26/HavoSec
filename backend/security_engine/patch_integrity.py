@@ -29,6 +29,12 @@ def assert_verified_patch(remediation: dict) -> str:
     verified_files = remediation.get("verified_affected_files")
     if not isinstance(declared, list) or declared != verified_files:
         raise PatchIntegrityError("Verified affected-file set no longer matches")
+    approval = remediation.get('publication_approval')
+    if remediation.get('status') == 'approved' and approval is not None and (
+            not isinstance(approval, dict) or approval.get('patch_sha256') != actual
+            or approval.get('source_commit') != remediation.get('verified_source_commit')
+            or approval.get('actor_id') != remediation.get('approved_by')):
+        raise PatchIntegrityError('Approval no longer matches the verified patch and source revision')
     return actual
 
 

@@ -4,8 +4,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
 from bson import ObjectId
 
+from integrations.github.client import GitHubAPIError
 from security_engine.pull_request_pipeline import PullRequestPipeline
 from security_engine.remediation_workspace import RemediationWorkspace
 
@@ -30,7 +32,8 @@ def record():
     }
 
 
-def test_exact_patch_creates_one_deterministic_commit_branch_and_pr(tmp_path):
+@pytest.mark.parametrize('lose_response', [False, True])
+def test_exact_patch_creates_one_deterministic_commit_branch_and_pr(tmp_path, lose_response):
     item = record()
     remediation = {
         'proposal': {'summary': 'Fix', 'explanation': 'Fix safely', 'affected_files': ['app.py'],
@@ -46,23 +49,55 @@ def test_exact_patch_creates_one_deterministic_commit_branch_and_pr(tmp_path):
         {'installation_id': 159047858}, {},
     )
     client = AsyncMock()
-    client.get_branch_head.side_effect = ['1' * 40, __import__('integrations.github.client', fromlist=['GitHubAPIError']).GitHubAPIError('missing', 404)]
+    branch_created = False
+    pr_created = False
+    receipt = {'number': 1, 'url': 'https://github.com/test/pull/1', 'state': 'open'}
+
+    async def head(_, branch):
+        if branch == 'main':
+            return '1' * 40
+        if branch_created:
+            return '6' * 40
+        raise GitHubAPIError('missing', 404)
+
+    async def branch(*args):
+        nonlocal branch_created
+        branch_created = True
+        if lose_response:
+            raise GitHubAPIError('connection closed')
+
+    async def create_pr(*args):
+        nonlocal pr_created
+        pr_created = True
+        if lose_response:
+            raise GitHubAPIError('connection closed')
+        return receipt
+
+    async def find_pr(*args):
+        return receipt if pr_created else None
+
+    client.get_branch_head.side_effect = head
     client.get_commit.return_value = {'tree': {'sha': '2' * 40}}
     client.get_tree.return_value = {'app.py': {'type': 'blob', 'mode': '100644', 'sha': '3' * 40}}
     client.get_blob.return_value = b"print('old')\n"
     client.create_blob.return_value = '4' * 40
     client.create_tree.return_value = '5' * 40
     client.create_commit.return_value = '6' * 40
-    client.find_pull_request.return_value = None
-    client.create_pull_request.return_value = {'number': 1, 'url': 'https://github.com/test/pull/1', 'state': 'open'}
+    client.create_branch.side_effect = branch
+    client.find_pull_request.side_effect = find_pr
+    client.create_pull_request.side_effect = create_pr
     pipeline = PullRequestPipeline(
-        storage, lambda _: client, Patcher(),
+        storage, lambda *_: client, Patcher(),
         lambda identity: RemediationWorkspace(identity, parent=tmp_path),
         timeout=30, patch_max_bytes=65536, patch_max_files=5,
     )
     assert asyncio.run(pipeline.process(item)) == 'open'
+    assert asyncio.run(pipeline.process(item)) == 'open'
     client.create_branch.assert_awaited_once_with(item['repository_full_name'], item['branch'], '6' * 40)
-    storage.complete_pull_request.assert_awaited_once()
+    client.create_pull_request.assert_awaited_once()
+    assert storage.complete_pull_request.await_count == 2
+    assert all(call.args == (item, '6' * 40, receipt)
+               for call in storage.complete_pull_request.await_args_list)
 
 
 def test_extra_changed_file_aborts_before_github_writes(tmp_path):
@@ -84,7 +119,7 @@ def test_extra_changed_file_aborts_before_github_writes(tmp_path):
     client.get_commit.return_value = {'tree': {'sha': '2' * 40}}
     client.get_tree.return_value = {'app.py': {'type': 'blob', 'mode': '100644', 'sha': '3' * 40}}
     client.get_blob.return_value = b"print('old')\n"
-    pipeline = PullRequestPipeline(storage, lambda _: client, ExtraPatcher(),
+    pipeline = PullRequestPipeline(storage, lambda *_: client, ExtraPatcher(),
         lambda identity: RemediationWorkspace(identity, parent=tmp_path), timeout=30,
         patch_max_bytes=65536, patch_max_files=5)
     assert asyncio.run(pipeline.process(item)) == 'failed'

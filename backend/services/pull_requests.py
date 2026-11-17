@@ -34,7 +34,8 @@ class PullRequestService:
         ))
         try:
             current_head = await client.get_branch_head(
-                source_control['repository_full_name'], source_control['default_branch']
+                source_control['repository_full_name'], source_control['default_branch'],
+                read_repository_id=source_control['repository_id'],
             )
         except GitHubAPIError as exc:
             raise HTTPException(502, 'GitHub source revision could not be verified') from exc

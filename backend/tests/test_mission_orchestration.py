@@ -14,8 +14,8 @@ from core.domain_indexes import ensure_domain_indexes
 from core.ownership import OrganizationScope
 from mission_orchestration.governance import ATTEMPT_BUSY, POLICY_DENIED, FixtureGateway, FixtureRejected
 from mission_orchestration.plan import (
-    APPROVAL_REQUIRED, ASSESSMENT_V1, FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION, FixtureAttempt, MissionRef,
-    ProgressEvent, TaskResult, validate_plan,
+    APPROVAL_REQUIRED, ASSESSMENT_V1, FIXTURE_REMEDIATION_MISSION, FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION,
+    FixtureAttempt, MissionRef, ProgressEvent, TaskResult, validate_plan,
 )
 from mission_orchestration.storage import OrchestrationStore, utc_now
 from repositories.missions import MissionRepository
@@ -120,7 +120,7 @@ def test_mongo_retries_projection_slot_and_cancellation():
     asyncio.run(with_test_database(check))
 
 
-def test_temporal_runs_isolated_semgrep_and_reports_gaps():
+def test_temporal_runs_isolated_semgrep_and_reports_gaps(monkeypatch):
     address = os.environ.get('MISSION_TEST_TEMPORAL_ADDRESS')
     commit = os.environ.get('MISSION_TEST_FIXTURE_COMMIT')
     if not address or not commit:
@@ -132,7 +132,9 @@ def test_temporal_runs_isolated_semgrep_and_reports_gaps():
     from mission_orchestration.activities import MissionActivities
     from mission_orchestration.dispatcher import MissionDispatcher
     from mission_orchestration.fixture_assessment import SCANNER_VERSION
+    from mission_orchestration import fixture_remediation
     from mission_orchestration.workflow import RepositoryAssessment
+    from security_engine.patch_integrity import patch_sha256
 
     async def check(db, store):
         client = await Client.connect(address)
@@ -142,19 +144,20 @@ def test_temporal_runs_isolated_semgrep_and_reports_gaps():
         async with Worker(client, task_queue=queue, workflows=[RepositoryAssessment], activities=[
             activities.acquire_mission_slot, activities.project_mission_progress, activities.run_mission_fixture,
         ]):
-            async def run(snapshot, expected):
+            async def run(snapshot, expected, mission_type=FIXTURE_SCAN_MISSION):
                 ref = await seed_mission(db, str(ObjectId()))
                 await db.missions.update_one(store.mission_query(ref), {'$set': {
-                    'mission_type': FIXTURE_SCAN_MISSION, 'fixture_commit': snapshot,
+                    'mission_type': mission_type, 'fixture_commit': snapshot,
                 }})
                 assert await dispatcher.dispatch_one()
                 assert await asyncio.wait_for(client.get_workflow_handle(ref.workflow_id).result(), 100) == expected
-                return (await store.get_mission(ref))['assessment_report']
+                return await store.get_mission(ref)
 
-            report = await run(commit, 'completed')
+            report = (await run(commit, 'completed'))['assessment_report']
             assert report['status'] == 'complete'
             assert report['commit_sha'] == commit and report['scanner_version'] == SCANNER_VERSION
             assert len(report['rules_sha256']) == 64
+            rules_digest = report['rules_sha256']
             assert report['coverage']['scanned'] == ['app.py', 'clean.py']
             assert not report['gaps']
             assert report['observations']
@@ -162,8 +165,31 @@ def test_temporal_runs_isolated_semgrep_and_reports_gaps():
                        for item in report['observations'])
             assert any(item['rule_id'].endswith('havosec.python.eval') for item in report['observations'])
 
-            report = await run('0' * 40, 'partial')
+            report = (await run('0' * 40, 'partial'))['assessment_report']
             assert report['status'] == 'incomplete' and report['gaps'] and not report['observations']
+
+            verified = (await run(commit, 'completed', FIXTURE_REMEDIATION_MISSION))['remediation_verification']
+            assert verified['status'] == 'verified', verified['summary']
+            assert verified['source_commit'] == commit
+            assert verified['rules_sha256'] == rules_digest
+            assert verified['patch_sha256'] == patch_sha256(verified['proposal']['patch'])
+            assert verified['comparison']['before_finding_count'] == 2
+            assert verified['comparison']['after_finding_count'] == 1
+            assert verified['publication_status'] == 'fixture_only'
+
+            original_git_blob = fixture_remediation.git_blob
+
+            async def shifted_eval(snapshot, name, workspace):
+                if name == fixture_remediation.PATCH_PATH:
+                    return (b'--- a/app.py\n+++ b/app.py\n@@ -2,5 +2,6 @@\n \n \n'
+                            b' def unsafe(user_input):\n+    # A comment does not fix eval.\n'
+                            b'     return eval(user_input)\n \n')
+                return await original_git_blob(snapshot, name, workspace)
+
+            monkeypatch.setattr(fixture_remediation, 'git_blob', shifted_eval)
+            failed = (await run(commit, 'partial', FIXTURE_REMEDIATION_MISSION))['remediation_verification']
+            assert failed['status'] == 'failed', failed['summary']
+            assert failed['comparison']['original_finding_present'] is True
 
     asyncio.run(with_test_database(check))
 

@@ -4,11 +4,12 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from mission_orchestration.fixture_assessment import assess_fixture
+from mission_orchestration.fixture_remediation import verify_fixture_remediation
 from mission_orchestration.github_assessment import assess_github_repository
 from mission_orchestration.governance import ATTEMPT_BUSY, FixtureGateway, FixtureRejected
 from mission_orchestration.plan import (
-    ASSESSMENT_V1, FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION, INCOMPLETE_SCAN, FixtureAttempt, MissionRef,
-    ProgressEvent, ProgressState, TaskResult,
+    ASSESSMENT_V1, FIXTURE_REMEDIATION_MISSION, FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION, INCOMPLETE_SCAN,
+    UNVERIFIED_PATCH, FixtureAttempt, MissionRef, ProgressEvent, ProgressState, TaskResult,
 )
 
 
@@ -42,13 +43,21 @@ class MissionActivities:
                 return cached
             try:
                 report = None
-                if request.mission.mission_type in (FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION) and task.id == 'assess':
-                    report = await self.scan_repository(request, attempt_id)
+                verification = None
+                mission_type = request.mission.mission_type
+                if mission_type in (FIXTURE_SCAN_MISSION, FIXTURE_REMEDIATION_MISSION,
+                                    GITHUB_SCAN_MISSION) and task.id == 'assess':
+                    operation = self.assess_github if mission_type == GITHUB_SCAN_MISSION else assess_fixture
+                    report = await self.run_with_heartbeat(request, attempt_id, operation)
                     output = task.output if report['status'] == 'complete' else INCOMPLETE_SCAN
+                    result = TaskResult(task.id, output, info.attempt, attempt_id)
+                elif mission_type == FIXTURE_REMEDIATION_MISSION and task.id == 'summarize':
+                    verification = await self.run_with_heartbeat(request, attempt_id, verify_fixture_remediation)
+                    output = 'fixture_patch_verified' if verification['status'] == 'verified' else UNVERIFIED_PATCH
                     result = TaskResult(task.id, output, info.attempt, attempt_id)
                 else:
                     result = await self.execute_fixture(request, task, info.attempt, attempt_id)
-                await self.gateway.finish(request, attempt_id, 'completed', result, report)
+                await self.gateway.finish(request, attempt_id, 'completed', result, report, verification=verification)
             except asyncio.CancelledError:
                 await self.gateway.finish(request, attempt_id, 'interrupted')
                 raise
@@ -70,14 +79,14 @@ class MissionActivities:
             await asyncio.sleep(0.2)
         return TaskResult(task.id, task.output, attempt, attempt_id)
 
-    async def scan_repository(self, request, attempt_id):
+    async def assess_github(self, mission):
+        return await assess_github_repository(mission, self.github_client_factory)
+
+    async def run_with_heartbeat(self, request, attempt_id, operation):
         mission = await self.store.get_mission(request.mission)
         await self.gateway.keep_alive(request, attempt_id)
         activity.heartbeat()
-        scan = asyncio.create_task(
-            assess_github_repository(mission, self.github_client_factory)
-            if request.mission.mission_type == GITHUB_SCAN_MISSION else assess_fixture(mission),
-        )
+        scan = asyncio.create_task(operation(mission))
         try:
             while not scan.done():
                 await asyncio.wait({scan}, timeout=0.5)

@@ -9,7 +9,8 @@ from bson import ObjectId
 from fastapi import HTTPException
 from mission_orchestration.github_scope import authorized_github_scope
 from mission_orchestration.plan import (
-    APPROVAL_REQUIRED, ASSESSMENT_V1, FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION, PLAN_VERSION, TaskResult,
+    APPROVAL_REQUIRED, ASSESSMENT_V1, FIXTURE_REMEDIATION_MISSION, FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION,
+    PLAN_VERSION, TaskResult,
 )
 from mission_orchestration.storage import OrchestrationStore, utc_now
 from utils.auth import possible_ids, serialize_user
@@ -78,7 +79,8 @@ class FixtureGateway:
     async def policy(self, mission, session):
         organization_id = mission['organization_id']
         ids = [organization_id, mission.get('project_id'), mission.get('asset_id')]
-        if (mission.get('mission_type') not in {'repository_assessment', FIXTURE_SCAN_MISSION, GITHUB_SCAN_MISSION}
+        if (mission.get('mission_type') not in {'repository_assessment', FIXTURE_SCAN_MISSION,
+                                               FIXTURE_REMEDIATION_MISSION, GITHUB_SCAN_MISSION}
                 or not all(ObjectId.is_valid(i) for i in ids)):
             return 'deny', 'invalid_mission_scope', None
 
@@ -134,8 +136,8 @@ class FixtureGateway:
             binding = {'organization_id': request.mission.organization_id,
                        'mission_id': request.mission.mission_id, 'plan_version': PLAN_VERSION,
                        'operation': task.id, 'inputs': task.inputs, 'target_digest': target}
-            if mission['mission_type'] == FIXTURE_SCAN_MISSION:
-                binding.update(mission_type=FIXTURE_SCAN_MISSION, fixture_commit=mission.get('fixture_commit'))
+            if mission['mission_type'] in (FIXTURE_SCAN_MISSION, FIXTURE_REMEDIATION_MISSION):
+                binding.update(mission_type=mission['mission_type'], fixture_commit=mission.get('fixture_commit'))
             elif mission['mission_type'] == GITHUB_SCAN_MISSION:
                 binding.update(mission_type=GITHUB_SCAN_MISSION, github_scope=mission.get('github_scope'),
                                source_commit=mission.get('source_commit'))
@@ -228,7 +230,7 @@ class FixtureGateway:
         if not updated.matched_count:
             raise FixtureRejected(POLICY_DENIED)
 
-    async def finish(self, request, attempt_id, state, result=None, report=None):
+    async def finish(self, request, attempt_id, state, result=None, report=None, *, verification=None):
         path = f'fixture_actions.{request.task_id}'
         identity = OrchestrationStore.mission_query(request.mission)
         filters = {**identity, f'{path}.attempts': {'$elemMatch': {'id': attempt_id, 'state': 'running'}}}
@@ -239,6 +241,8 @@ class FixtureGateway:
                            **{'orchestration.slot': True, 'orchestration.current_task': request.task_id})
         if report is not None:
             changes['assessment_report'] = report
+        if verification is not None:
+            changes['remediation_verification'] = verification
         updated = await self.db.missions.update_one(filters, {'$set': changes})
         if result is not None and not updated.matched_count:
             raise FixtureRejected(POLICY_DENIED)

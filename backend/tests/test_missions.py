@@ -93,3 +93,17 @@ def test_github_mission_pins_commit_and_keeps_it_on_replay(monkeypatch):
     assert submit(app, scan).json()['id'] == created.json()['id']
     assert len(calls) == 1
     assert len(db.mission_outbox.documents) == 1
+
+
+def test_fixture_verification_is_opt_in_and_report_is_scoped(monkeypatch):
+    app, db, identity, payload = mission_setup()
+    monkeypatch.setenv('MISSION_FIXTURE_COMMIT', 'c' * 40)
+    created = submit(app, {**payload, 'mission_type': 'fixture_remediation_verification'})
+    assert created.status_code == 201, created.text
+    assert db.missions.documents[0]['fixture_commit'] == 'c' * 40
+    endpoint = f"/api/missions/{created.json()['id']}/remediation-verification"
+    assert request(app, 'GET', endpoint).status_code == 404
+    db.missions.documents[0]['remediation_verification'] = {'status': 'verified', 'publication_status': 'fixture_only'}
+    assert request(app, 'GET', endpoint).json()['publication_status'] == 'fixture_only'
+    identity['organizationId'] = ORG_B
+    assert request(app, 'GET', endpoint).status_code == 404

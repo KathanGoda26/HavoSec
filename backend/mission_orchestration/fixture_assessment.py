@@ -1,4 +1,5 @@
 """Scan a fixed Git fixture without granting access to repository contents or credentials."""
+import logging
 import os
 import re
 import shutil
@@ -20,6 +21,7 @@ FIXTURE_FILES = ('app.py', 'clean.py')
 RULE_PATH = 'backend/security_engine/rules/semgrep-v1.yml'
 SCANNER_VERSION = '1.176.0'
 SCANNER_IMAGE = f'semgrep/semgrep:{SCANNER_VERSION}'
+log = logging.getLogger(__name__)
 
 
 async def git_blob(commit, relative_path, workspace):
@@ -48,21 +50,36 @@ class IsolatedSemgrepScanner(SemgrepScanner):
         docker = shutil.which('docker')
         if not docker or os.name != 'posix':
             raise DependencyUnavailable('Isolated scanning requires a local Linux Docker engine')
+        rules = workspace.artifacts / 'rules.yml'
+        # Docker mounts only these inputs. Their parent workspace remains private on the host.
+        # The non-root scanner must be able to read them even when the worker uses umask 077.
+        for parent, _, files in os.walk(workspace.repository):
+            directory = Path(parent)
+            directory.chmod(0o755)
+            for filename in files:
+                source = directory / filename
+                if source.is_symlink():
+                    raise ExecutionError('Unexpected link in scanner input')
+                source.chmod(0o644)
+        rules.chmod(0o644)
         name = f'havosec-fixture-{uuid4().hex}'
         host = [docker, '--host', 'unix:///var/run/docker.sock']
         options = {'cwd': workspace.repository, 'environment': controlled_environment()}
         try:
-            return await execute([
+            result = await execute([
                 *host, 'run', '--name', name, '--rm', '--pull', 'never',
                 '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
                 '--user', '65534:65534', '--pids-limit', '64', '--memory', '768m', '--cpus', '1',
                 '--tmpfs', '/tmp:rw,nosuid,nodev,size=64m,mode=1777', '--env', 'HOME=/tmp',
                 '--env', 'SEMGREP_SEND_METRICS=off', '--entrypoint', 'semgrep',
-                '--volume', f'{workspace.repository}:/src:ro',
-                '--volume', f'{workspace.artifacts / "rules.yml"}:/rules.yml:ro',
+                '--mount', f'type=bind,source={workspace.repository},target=/src,readonly',
+                '--mount', f'type=bind,source={rules},target=/rules.yml,readonly',
                 '--workdir', '/src', SCANNER_IMAGE, *self.arguments('/rules.yml', *self.targets),
             ], **options, timeout=self.timeout, max_output_bytes=self.max_output_bytes,
                 artifact_prefix=str(workspace.artifacts / 'semgrep'))
+            if result.exit_code in (125, 126, 127):
+                log.warning('Docker could not launch the isolated scanner (exit %s)', result.exit_code)
+            return result
         finally:
             try:
                 await execute([*host, 'rm', '-f', name], **options, timeout=5, max_output_bytes=8192,

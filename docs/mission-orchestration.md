@@ -14,6 +14,7 @@ Start a Temporal development server with `temporal server start-dev`. Run each p
 ```powershell
 python -m mission_orchestration worker
 python -m mission_orchestration dispatcher
+```
 
 Set `MONGO_URL` and `DB_NAME` to the same database used by the API. Both orchestration processes default to Temporal at `127.0.0.1:7233`, namespace `default`, and task queue `havosec-missions-v1`. To override these defaults, set `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, and `TEMPORAL_MISSION_TASK_QUEUE` consistently on both processes. Each organization can run one fixture mission at a time.
 
@@ -46,3 +47,5 @@ An operator can enable `mission_policy.github_assessment` on the organization wi
 The API and worker use the configured GitHub App to mint installation tokens restricted to that repository and `contents: read`. Only the API request receives the token, and the scanner container has no network access. The pilot scans Python and JavaScript/TypeScript source, excluding hidden directories, generated output, and vendored dependencies. Coverage limits or retrieval and scanner failures appear in the report. Findings are reported as rule observations with evidence hashes.
 
 The GitHub Actions pilot downloads the pinned public Tile_Studio revision anonymously using the same archive reader. Its temporary MongoDB contains only synthetic organization and installation records. A separate test verifies token request scope and that the archive redirect receives no authorization header. The public pilot does not validate any live installation credentials.
+
+For the authenticated Tile_Studio smoke check, run `bash backend/run_github_mission_smoke.sh` from the HavoSec checkout in Linux or WSL with Python 3.12+, Docker, and the existing GitHub App settings in `backend/.env`. The script starts disposable MongoDB and Temporal containers on ports 27249 and 7239. It queues and approves a mission through the API, fetches the pinned checkout with the live App, and reads the report through the API. The key stays on the machine; the GitHub Actions pilot continues to use anonymous archive access.

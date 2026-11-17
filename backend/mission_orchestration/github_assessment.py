@@ -1,6 +1,7 @@
 """Fetch one pinned repository archive, then scan selected source files offline."""
 import asyncio
 import gzip
+import logging
 import re
 import tarfile
 from hashlib import sha256
@@ -23,6 +24,7 @@ MAX_SOURCE = 16 * 1024 * 1024
 MAX_FILES = 400
 SOURCE_SUFFIXES = {'.py', '.js', '.jsx', '.ts', '.tsx'}
 EXCLUDED_DIRS = {'node_modules', 'vendor', 'dist', 'build', '__pycache__'}
+log = logging.getLogger(__name__)
 
 
 class BoundedArchive:
@@ -94,6 +96,7 @@ async def assess_github_repository(mission, client_factory=None):
     if not isinstance(commit, str) or not re.fullmatch('[0-9a-f]{40}', commit):
         report['gaps'].append('invalid_source_commit')
         return report
+    stage = 'archive download'
     try:
         with RunWorkspace(mission['_id']) as workspace:
             client = (client_factory or github_read_client)(scope)
@@ -101,6 +104,7 @@ async def assess_github_repository(mission, client_factory=None):
             await asyncio.wait_for(client.download_readonly_archive(
                 scope['repository'], scope['repository_id'], commit, archive, MAX_ARCHIVE,
             ), timeout=60)
+            stage = 'source extraction'
             workspace.repository.mkdir()
             names, excluded, gaps = materialize_source(archive, workspace.repository)
             report['coverage'].update(expected=names, missing=names, excluded=excluded)
@@ -112,10 +116,13 @@ async def assess_github_repository(mission, client_factory=None):
             (workspace.artifacts / 'rules.yml').write_bytes(rules)
             report['rules_sha256'] = sha256(rules).hexdigest()
             scanner = IsolatedSemgrepScanner(timeout=55, max_output_bytes=2_000_000, max_findings=150, targets=names)
+            stage = 'isolated scan'
             await populate_scan_report(report, mission, workspace, scanner,
                                        repository=scope['repository'], branch=scope['branch'])
-    except (GitHubAPIError, GitHubConfigurationError, TimeoutError):
+    except (GitHubAPIError, GitHubConfigurationError, TimeoutError) as error:
+        log.warning('GitHub assessment failed during %s (%s)', stage, type(error).__name__)
         report['gaps'].append('github_source_unavailable')
-    except (ExecutionError, OSError, ValueError, KeyError, EOFError, tarfile.TarError):
+    except (ExecutionError, OSError, ValueError, KeyError, EOFError, tarfile.TarError) as error:
+        log.warning('GitHub assessment failed during %s (%s)', stage, type(error).__name__)
         report['gaps'].append('repository_scan_failed')
     return report

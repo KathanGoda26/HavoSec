@@ -32,8 +32,7 @@ def test_plan_orders_dependencies_and_rejects_cycles_or_inputs_outside_scope():
         validate_plan((prepare, replace(assess, dependencies=('missing',)), summarize))
 
 
-async def seed_mission(db, organization_id):
-    mission = MissionRef(organization_id, str(ObjectId()))
+async def seed_mission_scope(db, organization_id):
     project_id, asset_id, user_id = ObjectId(), ObjectId(), ObjectId()
     await db.client_companies.update_one(
         {'_id': ObjectId(organization_id)}, {'$setOnInsert': {'status': 'active'}}, upsert=True)
@@ -41,6 +40,12 @@ async def seed_mission(db, organization_id):
     await db.projects.insert_one({'_id': project_id, 'organization_id': organization_id, 'status': 'active'})
     await db.assets.insert_one({'_id': asset_id, 'organization_id': organization_id, 'status': 'active',
                                 'project_id': str(project_id), 'type': 'repository', 'target': 'fixture://test'})
+    return project_id, asset_id, user_id
+
+
+async def seed_mission(db, organization_id):
+    mission = MissionRef(organization_id, str(ObjectId()))
+    project_id, asset_id, user_id = await seed_mission_scope(db, organization_id)
     now = utc_now()
     await db.missions.insert_one({
         '_id': ObjectId(mission.mission_id), 'organization_id': organization_id,
@@ -163,63 +168,123 @@ def test_temporal_runs_isolated_semgrep_and_reports_gaps():
     asyncio.run(with_test_database(check))
 
 
-def test_temporal_scans_authorized_public_github_snapshot():
+def test_temporal_scans_authorized_github_snapshot(monkeypatch):
     address = os.environ.get('MISSION_TEST_TEMPORAL_ADDRESS')
     pilot = os.environ.get('MISSION_TEST_GITHUB_PILOT')
+    use_app = os.environ.get('MISSION_TEST_USE_GITHUB_APP') == '1'
     if not address or not pilot:
+        if use_app:
+            pytest.fail('The authenticated check requires a test Temporal address and pilot repository')
         pytest.skip('Set a Temporal address and a public pilot snapshot')
-    name, repository_id, commit = pilot.split(',')
+    name, repo_id, *pin = pilot.split(',')
+    repository_id = int(repo_id)
+    if use_app:
+        from urllib.parse import urlsplit
+
+        mongo = urlsplit(os.environ.get('MISSION_TEST_MONGO_URL', ''))
+        assert mongo.scheme == 'mongodb' and mongo.hostname in ('localhost', '127.0.0.1', '::1'), (
+            'The authenticated check requires a local test MongoDB instance')
+        assert mongo.username is None and ',' not in mongo.netloc
+    else:
+        assert len(pin) == 1, 'The public pilot requires a pinned commit'
     pytest.importorskip('temporalio')
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
     from temporalio.client import Client
     from temporalio.worker import Worker
 
-    from integrations.github.client import download_repository_archive
+    from core.database import get_database, load_backend_environment
+    from integrations.github.client import GitHubAppClient, download_repository_archive
+    from integrations.github.config import GitHubAppSettings
     from mission_orchestration.activities import MissionActivities
     from mission_orchestration.dispatcher import MissionDispatcher
     from mission_orchestration.workflow import RepositoryAssessment
+    from routes.missions import router
+    from services import missions
+    from utils.auth import get_current_user
 
     class PublicGitHubArchive:
         async def download_readonly_archive(self, repository, requested_id, revision, destination, limit):
-            assert (repository, requested_id, revision) == (name, int(repository_id), commit)
+            assert (repository, requested_id, revision) == (name, repository_id, pin[0])
             await download_repository_archive('https://api.github.com', repository, revision, destination, limit)
 
+    async def pinned_public_commit(github):
+        assert github['repository'] == name and github['repository_id'] == repository_id
+        return pin[0]
+
+    if not use_app:
+        monkeypatch.setattr(missions, 'resolve_github_commit', pinned_public_commit)
+
     async def check(db, store):
-        ref = await seed_mission(db, str(ObjectId()))
-        document = await store.get_mission(ref)
-        identity = store.mission_query(ref)
+        organization = str(ObjectId())
+        project, asset, actor = await seed_mission_scope(db, organization)
+        if use_app:
+            load_backend_environment()
+            settings = GitHubAppSettings.from_environment(require_installation=True)
+            installed = await GitHubAppClient(settings).get_installation()
+        else:
+            installed = {'installation_id': 42, 'permissions': {'contents': 'read'}}
         integration = ObjectId()
-        scope = {'organization_id': ref.organization_id}
-        github = {'repository': name, 'repository_id': int(repository_id), 'branch': 'main',
-                  'installation_id': 42, 'integration_id': str(integration)}
-        await db.client_companies.update_one({'_id': ObjectId(ref.organization_id)}, {
-            '$set': {'mission_policy.github_assessment': 'allow'},
+        scope = {'organization_id': organization}
+        await db.client_companies.update_one({'_id': ObjectId(organization)}, {
+            '$set': {'mission_policy.github_assessment': 'require_approval'},
         })
         await db.github_integrations.insert_one({
-            **scope, '_id': integration, 'installation_id': 42, 'status': 'active',
-            'permissions': {'contents': 'write'},
+            **scope, '_id': integration, 'installation_id': installed['installation_id'], 'status': 'active',
+            'permissions': installed['permissions'],
         })
         await db.github_repositories.insert_one({
-            **scope, 'integration_id': str(integration), 'repository_id': int(repository_id), 'full_name': name,
+            **scope, 'integration_id': str(integration), 'repository_id': repository_id, 'full_name': name,
             'default_branch': 'main', 'authorized': True, 'connection_status': 'active',
         })
-        await db.assets.update_one({**scope, '_id': ObjectId(document['asset_id'])}, {'$set': {
+        await db.assets.update_one({**scope, '_id': asset}, {'$set': {
             'target': 'https://github.com/' + name,
             'source_control': {'provider': 'github', 'integration_id': str(integration),
-                               'repository_id': int(repository_id), 'repository_full_name': name,
+                               'repository_id': repository_id, 'repository_full_name': name,
                                'default_branch': 'main', 'connection_status': 'active'},
         }})
-        await db.missions.update_one(identity, {'$set': {
-            'mission_type': GITHUB_SCAN_MISSION, 'source_commit': commit, 'github_scope': github,
-        }})
+        app = FastAPI()
+        app.include_router(router, prefix='/api/missions')
+        app.dependency_overrides[get_database] = lambda: db
+        app.dependency_overrides[get_current_user] = lambda: {
+            'id': str(actor), 'organizationId': organization, 'role': 'admin',
+        }
         client = await Client.connect(address)
         queue = 'havosec-real-pilot-' + uuid4().hex
-        activities = MissionActivities(store, github_client_factory=lambda _: PublicGitHubArchive())
-        async with Worker(client, task_queue=queue, workflows=[RepositoryAssessment], activities=[
-            activities.acquire_mission_slot, activities.project_mission_progress, activities.run_mission_fixture,
-        ]):
-            assert await MissionDispatcher(store, client, queue).dispatch_one()
-            status = await asyncio.wait_for(client.get_workflow_handle(ref.workflow_id).result(), timeout=160)
-        report = (await store.get_mission(ref))['assessment_report']
+        factory = None if use_app else lambda _: PublicGitHubArchive()
+        activities = MissionActivities(store, github_client_factory=factory)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as api:
+            response = await api.post('/api/missions', headers={'Idempotency-Key': uuid4().hex}, json={
+                'project_id': str(project), 'asset_id': str(asset), 'objective': 'Read-only GitHub pilot',
+                'mission_type': GITHUB_SCAN_MISSION,
+            })
+            assert response.status_code == 201, response.text
+            queued = response.json()
+            commit = queued['source_commit']
+            assert isinstance(commit, str) and len(commit) == 40
+            assert not pin or commit == pin[0]
+            ref = MissionRef(organization, queued['id'], GITHUB_SCAN_MISSION)
+            path = '/api/missions/' + ref.mission_id
+            async with Worker(client, task_queue=queue, workflows=[RepositoryAssessment], activities=[
+                activities.acquire_mission_slot, activities.project_mission_progress, activities.run_mission_fixture,
+            ]):
+                assert await MissionDispatcher(store, client, queue).dispatch_one()
+                async with asyncio.timeout(40):
+                    while True:
+                        actions = (await api.get(path + '/actions')).json()
+                        pending = next((a for a in actions if a['operation'] == 'assess'
+                                        and a['decision']['outcome'] == 'require_approval'), None)
+                        if pending is not None:
+                            assert not pending['attempts']
+                            break
+                        await asyncio.sleep(.1)
+                approval = await api.post(path + '/actions/assess/approve',
+                                          json={'action_digest': pending['digest']})
+                assert approval.status_code == 200, approval.text
+                status = await asyncio.wait_for(client.get_workflow_handle(ref.workflow_id).result(), timeout=160)
+            report_response = await api.get(path + '/report')
+            assert report_response.status_code == 200, report_response.text
+            report = report_response.json()
         report_path = os.environ.get('MISSION_TEST_GITHUB_REPORT')
         if report_path:
             Path(report_path).write_text(json.dumps(report, default=str, indent=2) + '\n', encoding='utf-8')

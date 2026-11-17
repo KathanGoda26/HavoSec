@@ -25,6 +25,7 @@ def record():
     return {
         '_id': ObjectId(), 'organization_id': 'a' * 24, 'project_id': 'b' * 24,
         'asset_id': 'c' * 24, 'finding_id': 'd' * 24, 'remediation_id': 'e' * 24,
+        'repository_id': 1357212288,
         'repository_full_name': 'KathanGoda26/havosec-github-integration-test',
         'base_branch': 'main', 'branch': 'havosec/remediation-' + 'e' * 12,
         'expected_source_commit': '1' * 40, 'verified_patch_sha256': __import__('hashlib').sha256(PATCH.encode()).hexdigest(),

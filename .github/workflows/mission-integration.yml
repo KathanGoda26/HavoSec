@@ -38,6 +38,7 @@ jobs:
         working-directory: backend
         env:
           MISSION_TEST_FIXTURE_COMMIT: ${{ github.sha }}
+          MISSION_TEST_REHEARSE_RESTORE: '1'
           MISSION_TEST_GITHUB_PILOT: KathanGoda26/Tile_Studio,1430214091,550c53858aaddd011fa9d0d2939c98d358859618
           MISSION_TEST_GITHUB_REPORT: ${{ runner.temp }}/tile-studio-assessment.json
         run: |

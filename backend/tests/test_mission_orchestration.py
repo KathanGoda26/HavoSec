@@ -1,15 +1,18 @@
 import asyncio
 import json
 import os
+import re
+import subprocess
 from dataclasses import replace
 from pathlib import Path
+from time import monotonic
 from uuid import uuid4
 
 import pytest
 from bson import ObjectId
 from fastapi import HTTPException
 
-from core.database import DatabaseSettings, create_database_client
+from core.database import DatabaseSettings, create_database_client, get_database
 from core.domain_indexes import ensure_domain_indexes
 from core.ownership import OrganizationScope
 from mission_orchestration.governance import ATTEMPT_BUSY, POLICY_DENIED, FixtureGateway, FixtureRejected
@@ -75,6 +78,66 @@ async def with_test_database(check):
             await client.drop_database(settings.database_name)
         finally:
             client.close()
+
+
+async def rehearse_mission_restore(db, api, app, identity, path, report):
+    """Restore the finished pilot mission into a separate namespace."""
+    assert os.environ.get('MISSION_TEST_MONGO_URL') == 'mongodb://127.0.0.1:27017/?replicaSet=havosec_test'
+    assert re.fullmatch(r'havosec_mission_test_[0-9a-f]{32}', db.name)
+    copied = db.client['havosec_restore_test_' + uuid4().hex]
+    original_org = identity['organizationId']
+    other_org = ObjectId()
+    await db.client_companies.insert_one({'_id': other_org, 'status': 'active'})
+    original_actions = await api.get(path + '/actions')
+    original_actions.raise_for_status()
+    mission = await api.get(path)
+    mission.raise_for_status()
+    mid = mission.json()['id']
+    namespace = db.name + '.*'
+
+    def round_trip():
+        dump = subprocess.run(
+            ['docker', 'exec', 'mongo-test', 'mongodump', '--db', db.name, '--archive', '--gzip'],
+            capture_output=True, timeout=45,
+        )
+        assert dump.returncode == 0 and dump.stdout, dump.stderr.decode(errors='replace')
+        restore = subprocess.run(
+            ['docker', 'exec', '-i', 'mongo-test', 'mongorestore', '--archive', '--gzip', '--stopOnError',
+             '--nsInclude', namespace, '--nsFrom', namespace, '--nsTo', copied.name + '.*'],
+            input=dump.stdout, capture_output=True, timeout=45,
+        )
+        assert restore.returncode == 0, restore.stderr.decode(errors='replace')
+
+    start = monotonic()
+    try:
+        await asyncio.to_thread(round_trip)
+        await OrchestrationStore(copied).check_indexes()
+        audit_indexes = await copied.mission_execution_events.index_information()
+        assert 'org_mission_execution_history' in audit_indexes
+
+        filters = {'organization_id': original_org, 'mission_id': mid}
+        for collection in ('mission_outbox', 'mission_execution_events'):
+            records = await db[collection].find(filters).sort('_id', 1).to_list(length=100)
+            assert records
+            recovered = await copied[collection].find(filters).sort('_id', 1).to_list(length=100)
+            assert recovered == records
+
+        app.dependency_overrides[get_database] = lambda: copied
+        restored_report = await api.get(path + '/report')
+        assert restored_report.status_code == 200 and restored_report.json() == report
+        restored_actions = await api.get(path + '/actions')
+        assert restored_actions.status_code == 200 and restored_actions.json() == original_actions.json()
+        restored_mission = await api.get(path)
+        assert restored_mission.status_code == 200 and restored_mission.json() == mission.json()
+        identity['organizationId'] = str(other_org)
+        assert (await api.get(path + '/report')).status_code == 404
+        assert (await api.get(path + '/actions')).status_code == 404
+        print(f'Restore rehearsal passed in {monotonic() - start:.2f}s: '
+              'mission, report, approval, audit, outbox, indexes, and organization isolation')
+    finally:
+        identity['organizationId'] = original_org
+        app.dependency_overrides[get_database] = lambda: db
+        await db.client.drop_database(copied.name)
 
 
 def test_mongo_retries_projection_slot_and_cancellation():
@@ -219,7 +282,7 @@ def test_temporal_scans_authorized_github_snapshot(monkeypatch):
     from temporalio.client import Client
     from temporalio.worker import Worker
 
-    from core.database import get_database, load_backend_environment
+    from core.database import load_backend_environment
     from integrations.github.client import GitHubAppClient, download_repository_archive
     from integrations.github.config import GitHubAppSettings
     from mission_orchestration.activities import MissionActivities
@@ -272,9 +335,10 @@ def test_temporal_scans_authorized_github_snapshot(monkeypatch):
         app = FastAPI()
         app.include_router(router, prefix='/api/missions')
         app.dependency_overrides[get_database] = lambda: db
-        app.dependency_overrides[get_current_user] = lambda: {
+        identity = {
             'id': str(actor), 'organizationId': organization, 'role': 'admin',
         }
+        app.dependency_overrides[get_current_user] = lambda: identity
         client = await Client.connect(address)
         queue = 'havosec-real-pilot-' + uuid4().hex
         factory = None if use_app else lambda _: PublicGitHubArchive()
@@ -311,6 +375,8 @@ def test_temporal_scans_authorized_github_snapshot(monkeypatch):
             report_response = await api.get(path + '/report')
             assert report_response.status_code == 200, report_response.text
             report = report_response.json()
+            if os.environ.get('MISSION_TEST_REHEARSE_RESTORE') == '1':
+                await rehearse_mission_restore(db, api, app, identity, path, report)
         report_path = os.environ.get('MISSION_TEST_GITHUB_REPORT')
         if report_path:
             Path(report_path).write_text(json.dumps(report, default=str, indent=2) + '\n', encoding='utf-8')
